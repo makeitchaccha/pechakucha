@@ -19,6 +19,10 @@ RUN cargo build --release --bin text-to-speech-rs
 FROM debian:bookworm-slim AS runtime
 WORKDIR /app
 
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
 COPY --from=builder /app/target/release/text-to-speech-rs /app/text-to-speech-rs
 RUN useradd -m -u 1000 nonroot
 USER nonroot:nonroot

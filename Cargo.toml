@@ -21,7 +21,7 @@ sha2 = "0.10.9"
 hex = "0.4.3"
 tracing = "0.1.43"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
-songbird = { git = "https://github.com/beerpsi-forks/songbird", branch = "davey", features = ["builtin-queue"] }
+songbird = { git = "https://github.com/beerpsi-forks/songbird", rev = "25195877c715e08df25eda668df6b3a6bb3d3cdf", features = ["builtin-queue"] }
 poise = "0.6.1"
 dashmap = "6.1.0"
 symphonia = { version = "0.5.5", features = ["all"] }
@@ -32,4 +32,4 @@ fluent = "0.17.0"
 intl-memoizer = "0.5.3"
 include_dir = "0.7.4"
 clap = { version = "4.5.58", features = ["derive"] }
-rustls = "0.23.36"
+rustls = { version = "0.23", features = ["ring"] }

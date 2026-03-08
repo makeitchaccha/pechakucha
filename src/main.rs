@@ -42,7 +42,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let config = load_config(cli.config.to_str().ok_or(anyhow!("Invalid config path"))?)
-        .context("Failed to load config.toml")?;
+        .with_context(|| format!("Failed to load config from {}", cli.config.display()))?;
 
     let pool = prepare_database(&config.database).await?;
 

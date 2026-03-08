@@ -7,3 +7,4 @@ pub mod profile;
 mod sanitizer;
 pub mod localization;
 pub mod binding;
+pub mod usecase;

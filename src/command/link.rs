@@ -1,11 +1,7 @@
-use std::sync::Arc;
-use anyhow::Context as _;
-use poise::CreateReply;
-use poise::serenity_prelude::{ChannelId, CreateEmbed, GuildChannel, Mentionable};
-use poise::serenity_prelude::Permissions;
 use crate::binding::Binding;
 use crate::command::{Context, Result};
-use crate::command::profile::guild;
+use poise::serenity_prelude::{CreateEmbed, GuildChannel, Mentionable};
+use poise::CreateReply;
 
 #[poise::command(slash_command, guild_only, default_member_permissions = "MANAGE_GUILD")]
 pub async fn link(

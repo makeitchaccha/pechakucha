@@ -33,3 +33,4 @@ intl-memoizer = "0.5.3"
 include_dir = "0.7.4"
 clap = { version = "4.5.58", features = ["derive"] }
 rustls = { version = "0.23", features = ["ring"] }
+redb = "3.1.0"

@@ -1,12 +1,15 @@
 mod cli;
 mod database;
 
+use std::path::PathBuf;
+use std::sync::Arc;
 use anyhow::{anyhow, Context};
 use google_cloud_texttospeech_v1::client::TextToSpeech;
 use poise::serenity_prelude as serenity;
 use poise::serenity_prelude::GatewayIntents;
 use songbird::SerenityInit;
 use clap::{Parser};
+use redb::Database;
 use text_to_speech_rs::config::{load_config, AppConfig, DatabaseConfig, DatabaseKind};
 use text_to_speech_rs::handler::event_handler;
 use text_to_speech_rs::localization::{load_discord_locales, load_tts_locales};
@@ -16,6 +19,7 @@ use text_to_speech_rs::tts::registry::VoicePackageRegistry;
 use text_to_speech_rs::{command, handler};
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
+use text_to_speech_rs::binding::BindingRepository;
 use crate::cli::MigrateCommand;
 use crate::database::WrappedPool;
 
@@ -32,14 +36,19 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|_| anyhow!("CryptoProvider was already installed"))?;
     info!("Initialized CryptoProvider");
 
-    let config = load_config("config.toml")
-        .context("Failed to load config.toml")?;
+    if !cli.data_dir.exists() {
+        std::fs::create_dir_all(&cli.data_dir)
+            .context("Failed to create data directory")?;
+    }
+
+    let config = load_config(cli.config.as_path())
+        .with_context(|| format!("Failed to load config from {}", cli.config.display()))?;
 
     let pool = prepare_database(&config.database).await?;
 
     match cli.command {
         cli::Commands::Run { auto_migrate } => {
-            cli_run(config, pool, auto_migrate).await
+            cli_run(config, &cli.data_dir, pool, auto_migrate).await
         },
         cli::Commands::Migrate { command } => {
             match command {
@@ -60,7 +69,7 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
-async fn cli_run(config: AppConfig, pool: WrappedPool, auto_migrate: bool) -> anyhow::Result<()> {
+async fn cli_run(config: AppConfig, data_dir: &PathBuf, pool: WrappedPool, auto_migrate: bool) -> anyhow::Result<()> {
     if auto_migrate {
         pool.migrate_up().await?;
     } else {
@@ -103,9 +112,14 @@ async fn cli_run(config: AppConfig, pool: WrappedPool, auto_migrate: bool) -> an
 
     info!("VoiceRegistry built successfully.");
 
-    let repository = pool.profile_repository();
+    let data_db_path = data_dir.join("data.redb");
+    let data_db = Arc::new(Database::create(data_db_path)?);
+    let binding_repository = BindingRepository::new(data_db);
+    info!("Loaded bindings");
 
-    let resolver = ProfileResolver::new(repository.clone(), config.bot.global_profile.clone());
+    let profile_repository = pool.profile_repository();
+
+    let resolver = ProfileResolver::new(profile_repository.clone(), config.bot.global_profile.clone());
 
     let mut commands = command::commands();
 
@@ -125,9 +139,10 @@ async fn cli_run(config: AppConfig, pool: WrappedPool, auto_migrate: bool) -> an
                     session_manager: SessionManager::new(),
                     registry,
                     resolver,
-                    repository,
+                    repository: profile_repository,
                     tts_locales,
-                    discord_locales
+                    discord_locales,
+                    binding_repository,
                 })
             })
         })

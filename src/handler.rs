@@ -6,10 +6,11 @@ use anyhow::{anyhow, Context};
 use fluent::{fluent_args, FluentArgs};
 use poise::serenity_prelude as serenity;
 use poise::serenity_prelude::{ChannelId, VoiceState};
+use crate::binding::BindingRepository;
 use crate::localization::Locales;
 use crate::profile::repository::ProfileRepository;
 use crate::profile::resolver::ProfileResolver;
-use crate::sanitizer;
+use crate::{sanitizer, usecase};
 
 pub struct Data{
     pub session_manager: SessionManager,
@@ -18,6 +19,7 @@ pub struct Data{
     pub repository: Arc<dyn ProfileRepository>,
     pub tts_locales: Locales,
     pub discord_locales: Locales,
+    pub binding_repository: BindingRepository,
 }
 
 pub async fn event_handler(
@@ -65,6 +67,52 @@ pub async fn event_handler(
                         notification.locale_id,
                     ).await?;
                 }
+            }
+
+            let handle_connection = async |new_channel_id: ChannelId| -> anyhow::Result<()> {
+                let exists_session = data.session_manager.get(guild_id).is_some();
+
+                if exists_session {
+                    return Ok(());
+                }
+
+                if let Some(binding) = data.binding_repository.find_binding(guild_id).await? && binding.voice == new_channel_id {
+                    usecase::session::start(ctx, data, guild_id, binding.text, binding.voice).await?;
+                }
+
+                Ok(())
+            };
+
+            let handle_disconnection = async |old_channel_id: ChannelId| -> anyhow::Result<()> {
+                let Some(session) = data.session_manager.get_by_voice_channel(old_channel_id) else {
+                    return Ok(());
+                };
+
+                let in_room_members_count = ctx.cache.guild(guild_id).ok_or(anyhow!("Guild not found"))?.voice_states.iter()
+                    .filter(|(_, voice_state)| voice_state.channel_id == Some(old_channel_id))
+                    .filter(|&(&user_id, _)| user_id != new.user_id && !user_id.to_user_cached(&ctx.cache).map(|u| u.bot).unwrap_or(true))
+                    .count();
+
+                // disconnect if all human members left voice channel.
+                if in_room_members_count == 0 {
+                    session.handle.leave().await?;
+                }
+
+                Ok(())
+            };
+
+            match voice_state_update_kind(old, new) {
+                ChannelTransition::Connect { new_channel_id } => {
+                    handle_connection(new_channel_id).await?;
+                }
+                ChannelTransition::Move { new_channel_id, old_channel_id} => {
+                    handle_disconnection(old_channel_id).await?;
+                    handle_connection(new_channel_id).await?;
+                }
+                ChannelTransition::Disconnect { old_channel_id } => {
+                    handle_disconnection(old_channel_id).await?;
+                }
+                _ => {},
             }
         }
 

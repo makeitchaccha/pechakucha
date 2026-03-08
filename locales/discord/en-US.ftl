@@ -27,3 +27,11 @@ join-response = 🚀 TTS ready
 
 leave-response = 👋 TTS Ended
     .thanks = 💖 Thanks for using the bot!
+
+link-response = ⚙️ Successfully Linked!
+    .description = TTS is now enabled
+    .reading-channel = 📝 Reading channel
+    .voice-channel = 📢 Voice channel
+
+unlink-response = ⚙️ Successfully Unlinked!
+    .description = TTS is now disabled

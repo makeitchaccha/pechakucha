@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use clap::Parser;
 
 #[derive(Parser)]
@@ -5,6 +6,10 @@ use clap::Parser;
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
+    #[arg(long, default_value = "./config.toml", help = "Config file")]
+    pub config: PathBuf,
+    #[arg(long, default_value = "./data", help = "Data directory to save")]
+    pub data_dir: PathBuf,
 }
 
 #[derive(Parser)]

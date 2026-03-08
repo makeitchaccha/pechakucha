@@ -1,11 +1,14 @@
 mod session;
 mod moderation;
 mod profile;
+mod link;
 
 pub fn commands() -> Vec<poise::Command<crate::handler::Data, Error>> {
     vec![
         session::join(),
         session::leave(),
+        link::link(),
+        link::unlink(),
         moderation::register(),
         profile::voice(),
     ]

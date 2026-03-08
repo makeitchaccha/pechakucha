@@ -1,13 +1,14 @@
 use crate::tts::google_cloud::GoogleCloudVoiceConfig;
 use anyhow::anyhow;
-use config::Config;
+use config::{Config, File};
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::path::Path;
 use crate::tts::VoiceDetail;
 
-pub fn load_config(path: &str) -> anyhow::Result<AppConfig> {
+pub fn load_config(path: &Path) -> anyhow::Result<AppConfig> {
     let config = Config::builder()
-        .add_source(config::File::with_name(path))
+        .add_source(File::from(path))
         .add_source(config::Environment::with_prefix("TTSBOT").separator("_"))
         .build()?;
 

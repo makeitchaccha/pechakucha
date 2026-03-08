@@ -27,3 +27,11 @@ join-response = 🚀 読み上げ準備完了
 
 leave-response = 👋 読み上げ終了
     .thanks = 💖 ご利用ありがとうございました！
+
+link-response = ⚙️ リンク完了
+    .description = 読み上げ機能が有効化されました
+    .reading-channel = 📝 読み上げチャンネル
+    .voice-channel = 📢 ボイスチャンネル
+
+unlink-response = ⚙️ リンク解除
+    .description = 読み上げ機能が無効化されました

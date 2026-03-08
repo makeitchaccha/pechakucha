@@ -39,7 +39,10 @@ impl BindingRepository {
 
     pub async fn find_binding(&self, guild: GuildId) -> anyhow::Result<Option<Binding>> {
         let tx = self.db.begin_read()?;
-        let table = tx.open_table(BINDINGS_TABLE)?;
+        let table = match tx.open_table(BINDINGS_TABLE) {
+            Ok(table) => table,
+            Err(_) => return Ok(None)
+        };
         Ok(table.get(guild.get())?.map(|binding| Binding::from_tuple(binding.value())))
     }
 

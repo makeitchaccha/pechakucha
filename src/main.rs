@@ -32,7 +32,12 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|_| anyhow!("CryptoProvider was already installed"))?;
     info!("Initialized CryptoProvider");
 
-    let config = load_config("config.toml")
+    if !cli.data_dir.exists() {
+        std::fs::create_dir_all(&cli.data_dir)
+            .context("Failed to create data directory")?;
+    }
+
+    let config = load_config(cli.config.to_str().ok_or(anyhow!("Invalid config path"))?)
         .context("Failed to load config.toml")?;
 
     let pool = prepare_database(&config.database).await?;

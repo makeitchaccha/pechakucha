@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use poise::serenity_prelude::{ChannelId, GuildId};
-use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition, Value};
+use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
 
 /// Table schema:
 /// guild_id -> (voice_channel_id, text_channel_id)

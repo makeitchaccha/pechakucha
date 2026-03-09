@@ -26,7 +26,7 @@ impl ProfileResolver {
     }
 
     pub async fn resolve_guild_with_fallback(&self, guild_id: GuildId) -> Result<ResolvedProfile> {
-        if let Some(profile_id) = self.repository.find_by_guild(guild_id).await? {
+        if let Some(_profile_id) = self.repository.find_by_guild(guild_id).await? {
             return Ok(ResolvedProfile::guild_default(self.fallback_profile_id.clone()));
         }
 

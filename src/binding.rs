@@ -1,6 +1,6 @@
-use std::sync::Arc;
 use poise::serenity_prelude::{ChannelId, GuildId};
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
+use std::sync::Arc;
 
 /// Table schema:
 /// guild_id -> (voice_channel_id, text_channel_id)
@@ -29,7 +29,7 @@ impl Binding {
 }
 
 pub struct BindingRepository {
-    db: Arc<Database>
+    db: Arc<Database>,
 }
 
 impl BindingRepository {
@@ -41,9 +41,11 @@ impl BindingRepository {
         let tx = self.db.begin_read()?;
         let table = match tx.open_table(BINDINGS_TABLE) {
             Ok(table) => table,
-            Err(_) => return Ok(None)
+            Err(_) => return Ok(None),
         };
-        Ok(table.get(guild.get())?.map(|binding| Binding::from_tuple(binding.value())))
+        Ok(table
+            .get(guild.get())?
+            .map(|binding| Binding::from_tuple(binding.value())))
     }
 
     pub async fn save_binding(&self, guild: GuildId, binding: Binding) -> anyhow::Result<()> {
@@ -57,7 +59,8 @@ impl BindingRepository {
             }
             tx.commit()?;
             Ok(())
-        }).await??;
+        })
+        .await??;
 
         Ok(())
     }
@@ -73,7 +76,8 @@ impl BindingRepository {
             }
             tx.commit()?;
             Ok(())
-        }).await??;
+        })
+        .await??;
 
         Ok(())
     }

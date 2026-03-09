@@ -9,7 +9,7 @@ pub async fn voice(_: Context<'_>) -> Result<()> {
 }
 
 #[poise::command(slash_command, subcommands("user_choose", "user_clear"), subcommand_required)]
-pub async fn user(ctx: Context<'_>) -> Result<()> {
+pub async fn user(_ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 
@@ -30,7 +30,7 @@ pub async fn user_clear(ctx: Context<'_>) -> Result<()> {
 }
 
 #[poise::command(slash_command, subcommands("guild_choose", "guild_clear"), subcommand_required)]
-pub async fn guild(ctx: Context<'_>) -> Result<()> {
+pub async fn guild(_ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 

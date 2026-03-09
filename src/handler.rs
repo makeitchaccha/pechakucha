@@ -3,7 +3,7 @@ use crate::session::manager::SessionManager;
 use crate::session::{SessionHandle, Speaker};
 use crate::tts::registry::VoicePackageRegistry;
 use anyhow::{anyhow, Context};
-use fluent::{fluent_args, FluentArgs};
+use fluent::fluent_args;
 use poise::serenity_prelude as serenity;
 use poise::serenity_prelude::{ChannelId, VoiceState};
 use crate::binding::BindingRepository;

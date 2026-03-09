@@ -52,7 +52,7 @@ pub fn replace_mentions(
 
 pub fn sanitize(content: &str, limit: usize) -> String {
     let mut content = CODE_BLOCK_REGEX
-        .replace_all(&content, "code block")
+        .replace_all(content, "code block")
         .to_string();
 
     content = URL_REGEX.replace_all(&content, "URL").to_string();

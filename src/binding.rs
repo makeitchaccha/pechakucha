@@ -1,5 +1,5 @@
 use poise::serenity_prelude::{ChannelId, GuildId};
-use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
+use redb::{Database, ReadableDatabase, TableDefinition};
 use std::sync::Arc;
 
 /// Table schema:

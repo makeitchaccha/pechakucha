@@ -10,7 +10,7 @@ use poise::serenity_prelude as serenity;
 use poise::serenity_prelude::GatewayIntents;
 use redb::Database;
 use songbird::SerenityInit;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Arc;
 use text_to_speech_rs::binding::BindingRepository;
 use text_to_speech_rs::config::{AppConfig, DatabaseConfig, DatabaseKind, load_config};
@@ -68,7 +68,7 @@ async fn main() -> anyhow::Result<()> {
 
 async fn cli_run(
     config: AppConfig,
-    data_dir: &PathBuf,
+    data_dir: &Path,
     pool: WrappedPool,
     auto_migrate: bool,
 ) -> anyhow::Result<()> {

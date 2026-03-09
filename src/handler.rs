@@ -45,7 +45,7 @@ pub async fn event_handler(
                     }
                     ChannelTransition::Disconnect { old_channel_id: _ } => {
                         if let Some(guild_id) = old.as_ref().and_then(|state| state.guild_id) {
-                            shutdown_session(&ctx, guild_id, &data.session_manager).await?;
+                            shutdown_session(ctx, guild_id, &data.session_manager).await?;
                         }
                     }
                     _ => {}

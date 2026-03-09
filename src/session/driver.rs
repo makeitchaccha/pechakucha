@@ -2,7 +2,7 @@ use crate::session::SessionCommand;
 use async_trait::async_trait;
 use songbird::{Call, CoreEvent, Event, EventContext, EventHandler, TrackEvent};
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 
 #[async_trait]
 pub trait AudioDriver: Sync + Send {
@@ -16,10 +16,13 @@ pub trait AudioDriver: Sync + Send {
 }
 
 pub struct SongbirdDriver {
-    pub call: Arc<Mutex<Call>>
+    pub call: Arc<Mutex<Call>>,
 }
 
-struct SongbirdEventHandler<T: Send + Sync + Clone> { tx: mpsc::Sender<T>, result: T, }
+struct SongbirdEventHandler<T: Send + Sync + Clone> {
+    tx: mpsc::Sender<T>,
+    result: T,
+}
 #[async_trait]
 impl<T: Send + Sync + Clone> EventHandler for SongbirdEventHandler<T> {
     async fn act(&self, _: &EventContext<'_>) -> Option<Event> {
@@ -45,11 +48,20 @@ impl AudioDriver for SongbirdDriver {
 
     async fn subscribe_to_end_event(&self, tx: mpsc::Sender<()>) {
         let mut call = self.call.lock().await;
-        call.add_global_event(Event::Track(TrackEvent::End), SongbirdEventHandler { tx, result: () });
+        call.add_global_event(
+            Event::Track(TrackEvent::End),
+            SongbirdEventHandler { tx, result: () },
+        );
     }
 
     async fn subscribe_to_disconnect_event(&self, tx: mpsc::Sender<SessionCommand>) {
         let mut call = self.call.lock().await;
-        call.add_global_event(Event::Core(CoreEvent::DriverDisconnect), SongbirdEventHandler { tx, result: SessionCommand::Disconnect });
+        call.add_global_event(
+            Event::Core(CoreEvent::DriverDisconnect),
+            SongbirdEventHandler {
+                tx,
+                result: SessionCommand::Disconnect,
+            },
+        );
     }
 }

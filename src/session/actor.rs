@@ -7,14 +7,13 @@ use tokio::select;
 use tokio::sync::{broadcast, mpsc};
 use tracing;
 
-
 #[derive(Clone)]
-enum WorkerCommand{
-    GenerateAndPlay(GenerateAndPlay)
+enum WorkerCommand {
+    GenerateAndPlay(GenerateAndPlay),
 }
 
 #[derive(Clone)]
-struct GenerateAndPlay{
+struct GenerateAndPlay {
     text: String,
     speaker: Option<Speaker>,
     voice: Arc<dyn Voice>,
@@ -47,7 +46,7 @@ impl SessionActor {
             rx: cmd_rx,
             system_tx,
             user_tx,
-            driver
+            driver,
         };
 
         (actor, SessionHandle::new(cmd_tx))
@@ -58,7 +57,12 @@ impl SessionActor {
 
         while let Some(cmd) = self.rx.recv().await {
             match cmd {
-                SessionCommand::Speak { text, voice, speaker, priority } => {
+                SessionCommand::Speak {
+                    text,
+                    voice,
+                    speaker,
+                    priority,
+                } => {
                     let command = WorkerCommand::GenerateAndPlay(GenerateAndPlay {
                         text,
                         speaker,
@@ -67,13 +71,15 @@ impl SessionActor {
 
                     // ignore since not recoverable
                     match priority {
-                        Priority::System => { let _ = self.system_tx.send(command).await; },
-                        Priority::User => { let _ = self.user_tx.send(command); },
+                        Priority::System => {
+                            let _ = self.system_tx.send(command).await;
+                        }
+                        Priority::User => {
+                            let _ = self.user_tx.send(command);
+                        }
                     };
                 }
-                SessionCommand::Stop => {
-
-                },
+                SessionCommand::Stop => {}
                 SessionCommand::Leave => {
                     tracing::info!("Received Leave command");
                     break;
@@ -94,7 +100,11 @@ impl SessionActor {
         }
     }
 
-    async fn worker_loop(driver: Arc<dyn AudioDriver>, mut system_rx: mpsc::Receiver<WorkerCommand>, mut user_rx: broadcast::Receiver<WorkerCommand>) {
+    async fn worker_loop(
+        driver: Arc<dyn AudioDriver>,
+        mut system_rx: mpsc::Receiver<WorkerCommand>,
+        mut user_rx: broadcast::Receiver<WorkerCommand>,
+    ) {
         tracing::info!("Worker started");
 
         // Token system for eager voice generation
@@ -185,14 +195,17 @@ impl SessionActor {
                     break;
                 }
             }
-
         }
     }
 
-    async fn generate_and_play(segment: Vec<String>, voice: Arc<dyn Voice>, driver: Arc<dyn AudioDriver>) -> anyhow::Result<usize> {
+    async fn generate_and_play(
+        segment: Vec<String>,
+        voice: Arc<dyn Voice>,
+        driver: Arc<dyn AudioDriver>,
+    ) -> anyhow::Result<usize> {
         let mut audios = Vec::new();
         for segment in segment.iter() {
-            let audio_data = match voice.generate(&segment).await {
+            let audio_data = match voice.generate(segment).await {
                 Ok(data) => data,
                 Err(e) => {
                     return Err(anyhow::anyhow!(e).context("Failed to generate voice"));

@@ -1,12 +1,12 @@
-#[cfg(feature = "sqlite")]
-pub mod sqlite;
 #[cfg(feature = "postgres")]
 pub mod postgres;
+#[cfg(feature = "sqlite")]
+pub mod sqlite;
 
+use crate::profile::ResolvedProfile;
 use anyhow::Result;
 use async_trait::async_trait;
 use poise::serenity_prelude::{GuildId, UserId};
-use crate::profile::ResolvedProfile;
 
 #[async_trait]
 pub trait ProfileRepository: Send + Sync {
@@ -16,7 +16,11 @@ pub trait ProfileRepository: Send + Sync {
     /// for document purpose implementation for find profile id
     /// concrete repository may implement more efficient procedures
     /// such as oneliner query for priority order.
-    async fn find_highest_priority(&self, user_id: UserId, guild_id: GuildId) -> Result<Option<ResolvedProfile>> {
+    async fn find_highest_priority(
+        &self,
+        user_id: UserId,
+        guild_id: GuildId,
+    ) -> Result<Option<ResolvedProfile>> {
         // user first
         if let Some(profile_id) = self.find_by_user(user_id).await? {
             return Ok(Some(ResolvedProfile::user_override(profile_id)));

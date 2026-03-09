@@ -1,7 +1,9 @@
-use crate::tts::{Voice, VoiceDetail, VoiceError, DISCORD_SAMPLE_RATE};
+use crate::tts::{DISCORD_SAMPLE_RATE, Voice, VoiceDetail, VoiceError};
 use async_trait::async_trait;
 use google_cloud_texttospeech_v1::client::TextToSpeech;
-use google_cloud_texttospeech_v1::model::{AudioConfig, AudioEncoding, SsmlVoiceGender, SynthesisInput, VoiceSelectionParams};
+use google_cloud_texttospeech_v1::model::{
+    AudioConfig, AudioEncoding, SsmlVoiceGender, SynthesisInput, VoiceSelectionParams,
+};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Copy, Deserialize, Default)]
@@ -35,7 +37,7 @@ pub enum Encoding {
     Mulaw,
     Alaw,
     // Pcm, // omit since no header format requires effort to support.
-    M4A
+    M4A,
 }
 
 impl From<Encoding> for AudioEncoding {
@@ -46,12 +48,12 @@ impl From<Encoding> for AudioEncoding {
             Encoding::OggOpus => AudioEncoding::OggOpus,
             Encoding::Mulaw => AudioEncoding::Mulaw,
             Encoding::Alaw => AudioEncoding::Alaw,
-            Encoding::M4A => AudioEncoding::M4A
+            Encoding::M4A => AudioEncoding::M4A,
         }
     }
 }
 
-#[derive(Debug, Clone, Deserialize,Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct GoogleCloudVoiceConfig {
     pub language_code: String,
     pub name: Option<String>,
@@ -77,9 +79,9 @@ impl From<GoogleCloudVoiceConfig> for (VoiceSelectionParams, AudioConfig) {
     fn from(c: GoogleCloudVoiceConfig) -> (VoiceSelectionParams, AudioConfig) {
         let params = VoiceSelectionParams::new()
             .set_language_code(&c.language_code)
-            .set_name(&c.name.unwrap_or_default())
+            .set_name(c.name.unwrap_or_default())
             .set_ssml_gender(c.ssml_gender.unwrap_or_default())
-            .set_model_name(&c.model_name.unwrap_or_default());
+            .set_model_name(c.model_name.unwrap_or_default());
 
         let audio = AudioConfig::new()
             .set_audio_encoding(AudioEncoding::Pcm)
@@ -96,7 +98,7 @@ pub struct GoogleCloudVoice {
     identifier: String,
     client: TextToSpeech,
     voice_selection_params: VoiceSelectionParams,
-    audio_config: AudioConfig
+    audio_config: AudioConfig,
 }
 
 impl GoogleCloudVoice {
@@ -111,7 +113,10 @@ impl GoogleCloudVoice {
         }
     }
 
-    fn build_identifier(voice_selection_params: &VoiceSelectionParams, audio_config: &AudioConfig) -> String {
+    fn build_identifier(
+        voice_selection_params: &VoiceSelectionParams,
+        audio_config: &AudioConfig,
+    ) -> String {
         format!(
             "google_cloud-(lang:{},name:{},gender:{},model:{},encoding:{},speaking_rate:{},pitch:{},gain:{},sample_rate_hz:{})",
             voice_selection_params.language_code,
@@ -139,17 +144,18 @@ impl Voice for GoogleCloudVoice {
 
     async fn generate(&self, text: &str) -> Result<Vec<u8>, VoiceError> {
         tracing::debug!("google cloud voice requested to generate: {}", text);
-        let response =
-            match self.client.synthesize_speech()
-                .set_voice(self.voice_selection_params.clone())
-                .set_audio_config(self.audio_config.clone())
-                .set_input(SynthesisInput::new()
-                    .set_text(text)
-                )
-                .send().await {
-                    Ok(response) => response,
-                    Err(err) => return Err(VoiceError::Api(err.into()))
-                };
+        let response = match self
+            .client
+            .synthesize_speech()
+            .set_voice(self.voice_selection_params.clone())
+            .set_audio_config(self.audio_config.clone())
+            .set_input(SynthesisInput::new().set_text(text))
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(err) => return Err(VoiceError::Api(err.into())),
+        };
 
         Ok(response.audio_content.to_vec())
     }
@@ -159,7 +165,7 @@ impl Voice for GoogleCloudVoice {
 mod tests {
     use super::*;
     use google_cloud_texttospeech_v1::model::{
-        AudioConfig, AudioEncoding, SsmlVoiceGender, VoiceSelectionParams
+        AudioConfig, AudioEncoding, SsmlVoiceGender, VoiceSelectionParams,
     };
 
     #[test]
@@ -178,6 +184,9 @@ mod tests {
             .set_sample_rate_hertz(48000)
             .set_volume_gain_db(3);
 
-        assert_eq!(GoogleCloudVoice::build_identifier(&voice_params, &audio_config), "google_cloud-(lang:ja-JP,name:ja-JP-Wavenet-A,gender:FEMALE,model:default,encoding:PCM,speaking_rate:1.5,pitch:-2,gain:3,sample_rate_hz:48000)");
+        assert_eq!(
+            GoogleCloudVoice::build_identifier(&voice_params, &audio_config),
+            "google_cloud-(lang:ja-JP,name:ja-JP-Wavenet-A,gender:FEMALE,model:default,encoding:PCM,speaking_rate:1.5,pitch:-2,gain:3,sample_rate_hz:48000)"
+        );
     }
 }

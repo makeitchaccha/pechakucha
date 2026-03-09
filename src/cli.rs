@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use clap::Parser;
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(name = "text-to-speech-rs")]
@@ -15,7 +15,11 @@ pub struct Cli {
 #[derive(Parser)]
 pub enum Commands {
     Run {
-        #[arg(long, default_value_t = true, help = "Automatically run database migrations on startup")]
+        #[arg(
+            long,
+            default_value_t = true,
+            help = "Automatically run database migrations on startup"
+        )]
         auto_migrate: bool,
     },
     Migrate {

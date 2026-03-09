@@ -1,7 +1,7 @@
-use std::collections::{HashSet};
-use std::sync::Arc;
 use anyhow::Context;
 use sqlx::migrate::{AppliedMigration, Migrate, Migration};
+use std::collections::HashSet;
+use std::sync::Arc;
 use text_to_speech_rs::profile::repository::ProfileRepository;
 
 pub enum WrappedPool {
@@ -13,11 +13,17 @@ impl WrappedPool {
     pub async fn migrate_up(&self) -> anyhow::Result<()> {
         match &self {
             WrappedPool::Sqlite(pool) => {
-                sqlx::migrate!("./migrations/sqlite").run(pool).await.context("Failed to run SQLite migrations")?;
+                sqlx::migrate!("./migrations/sqlite")
+                    .run(pool)
+                    .await
+                    .context("Failed to run SQLite migrations")?;
                 Ok(())
-            },
+            }
             WrappedPool::Postgres(pool) => {
-                sqlx::migrate!("./migrations/postgres").run(pool).await.context("Failed to run PostgreSQL migrations")?;
+                sqlx::migrate!("./migrations/postgres")
+                    .run(pool)
+                    .await
+                    .context("Failed to run PostgreSQL migrations")?;
                 Ok(())
             }
         }
@@ -27,10 +33,8 @@ impl WrappedPool {
         applied_migration: Vec<AppliedMigration>,
         migrator: &sqlx::migrate::Migrator,
     ) -> anyhow::Result<Vec<(Migration, bool)>> {
-        let applied_versions: HashSet<i64> = applied_migration
-            .into_iter()
-            .map(|m| m.version)
-            .collect();
+        let applied_versions: HashSet<i64> =
+            applied_migration.into_iter().map(|m| m.version).collect();
 
         Ok(migrator
             .iter()
@@ -46,12 +50,14 @@ impl WrappedPool {
             WrappedPool::Sqlite(pool) => {
                 let migrator = sqlx::migrate!("./migrations/sqlite");
                 let mut conn = pool.acquire().await?;
-                Self::collect_migration_status(conn.list_applied_migrations().await?, &migrator).await
-            },
+                Self::collect_migration_status(conn.list_applied_migrations().await?, &migrator)
+                    .await
+            }
             WrappedPool::Postgres(pool) => {
                 let migrator = sqlx::migrate!("./migrations/postgres");
                 let mut conn = pool.acquire().await?;
-                Self::collect_migration_status(conn.list_applied_migrations().await?, &migrator).await
+                Self::collect_migration_status(conn.list_applied_migrations().await?, &migrator)
+                    .await
             }
         }
     }
@@ -66,7 +72,7 @@ impl WrappedPool {
                 }
                 #[cfg(not(feature = "sqlite"))]
                 unreachable!("sqlite feature must be enabled to create this pool")
-            },
+            }
             WrappedPool::Postgres(pool) => {
                 #[cfg(feature = "postgres")]
                 {

@@ -1,10 +1,10 @@
-pub mod tts;
-pub mod session;
+pub mod binding;
+pub mod command;
 pub mod config;
 pub mod handler;
-pub mod command;
+pub mod localization;
 pub mod profile;
 mod sanitizer;
-pub mod localization;
-pub mod binding;
+pub mod session;
+pub mod tts;
 pub mod usecase;

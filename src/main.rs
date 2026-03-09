@@ -1,16 +1,19 @@
 mod cli;
 mod database;
 
-use std::path::PathBuf;
-use std::sync::Arc;
-use anyhow::{anyhow, Context};
+use crate::cli::MigrateCommand;
+use crate::database::WrappedPool;
+use anyhow::{Context, anyhow};
+use clap::Parser;
 use google_cloud_texttospeech_v1::client::TextToSpeech;
 use poise::serenity_prelude as serenity;
 use poise::serenity_prelude::GatewayIntents;
-use songbird::SerenityInit;
-use clap::{Parser};
 use redb::Database;
-use text_to_speech_rs::config::{load_config, AppConfig, DatabaseConfig, DatabaseKind};
+use songbird::SerenityInit;
+use std::path::Path;
+use std::sync::Arc;
+use text_to_speech_rs::binding::BindingRepository;
+use text_to_speech_rs::config::{AppConfig, DatabaseConfig, DatabaseKind, load_config};
 use text_to_speech_rs::handler::event_handler;
 use text_to_speech_rs::localization::{load_discord_locales, load_tts_locales};
 use text_to_speech_rs::profile::resolver::ProfileResolver;
@@ -19,9 +22,6 @@ use text_to_speech_rs::tts::registry::VoicePackageRegistry;
 use text_to_speech_rs::{command, handler};
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
-use text_to_speech_rs::binding::BindingRepository;
-use crate::cli::MigrateCommand;
-use crate::database::WrappedPool;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -37,8 +37,7 @@ async fn main() -> anyhow::Result<()> {
     info!("Initialized CryptoProvider");
 
     if !cli.data_dir.exists() {
-        std::fs::create_dir_all(&cli.data_dir)
-            .context("Failed to create data directory")?;
+        std::fs::create_dir_all(&cli.data_dir).context("Failed to create data directory")?;
     }
 
     let config = load_config(cli.config.as_path())
@@ -49,27 +48,30 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         cli::Commands::Run { auto_migrate } => {
             cli_run(config, &cli.data_dir, pool, auto_migrate).await
-        },
-        cli::Commands::Migrate { command } => {
-            match command {
-                MigrateCommand::Up => {
-                    pool.migrate_up().await?;
-                    Ok(())
-                },
-                MigrateCommand::Status => {
-                    let status = pool.migrate_status().await?;
-                    for (m, is_applied) in status {
-                        let mark = if is_applied { "✅" } else { "⚠️ PENDING" };
-                        println!("{} [{}] {}", mark, m.version, m.description);
-                    }
-                    Ok(())
+        }
+        cli::Commands::Migrate { command } => match command {
+            MigrateCommand::Up => {
+                pool.migrate_up().await?;
+                Ok(())
+            }
+            MigrateCommand::Status => {
+                let status = pool.migrate_status().await?;
+                for (m, is_applied) in status {
+                    let mark = if is_applied { "✅" } else { "⚠️ PENDING" };
+                    println!("{} [{}] {}", mark, m.version, m.description);
                 }
+                Ok(())
             }
         },
     }
 }
 
-async fn cli_run(config: AppConfig, data_dir: &PathBuf, pool: WrappedPool, auto_migrate: bool) -> anyhow::Result<()> {
+async fn cli_run(
+    config: AppConfig,
+    data_dir: &Path,
+    pool: WrappedPool,
+    auto_migrate: bool,
+) -> anyhow::Result<()> {
     if auto_migrate {
         pool.migrate_up().await?;
     } else {
@@ -79,12 +81,18 @@ async fn cli_run(config: AppConfig, data_dir: &PathBuf, pool: WrappedPool, auto_
 
         if pending_count > 0 {
             // then there is a pending migration.
-            error!("Database schema is out of date ({} pending migrations).", pending_count);
+            error!(
+                "Database schema is out of date ({} pending migrations).",
+                pending_count
+            );
             error!("Details:");
             for (m, _) in status.iter().filter(|(_, is_applied)| !*is_applied) {
                 error!("⚠️ PENDING [{}] {}", m.version, m.description);
             }
-            anyhow::bail!("Please run '{} migrate up' or start with '--auto-migrate=true'.", std::env::args().next().unwrap_or("bot".to_string()));
+            anyhow::bail!(
+                "Please run '{} migrate up' or start with '--auto-migrate=true'.",
+                std::env::args().next().unwrap_or("bot".to_string())
+            );
         }
     }
 
@@ -119,7 +127,10 @@ async fn cli_run(config: AppConfig, data_dir: &PathBuf, pool: WrappedPool, auto_
 
     let profile_repository = pool.profile_repository();
 
-    let resolver = ProfileResolver::new(profile_repository.clone(), config.bot.global_profile.clone());
+    let resolver = ProfileResolver::new(
+        profile_repository.clone(),
+        config.bot.global_profile.clone(),
+    );
 
     let mut commands = command::commands();
 
@@ -151,7 +162,8 @@ async fn cli_run(config: AppConfig, data_dir: &PathBuf, pool: WrappedPool, auto_
     let intents = GatewayIntents::non_privileged() | GatewayIntents::MESSAGE_CONTENT;
     let mut client = serenity::ClientBuilder::new(config.bot.token, intents)
         .register_songbird()
-        .framework(framework).await?;
+        .framework(framework)
+        .await?;
 
     client.start().await?;
 
@@ -164,16 +176,20 @@ async fn prepare_database(config: &DatabaseConfig) -> anyhow::Result<WrappedPool
             #[cfg(feature = "sqlite")]
             {
                 info!("Opening SQLite database...");
-                Ok(WrappedPool::Sqlite(sqlx::SqlitePool::connect(&config.url).await?))
+                Ok(WrappedPool::Sqlite(
+                    sqlx::SqlitePool::connect(&config.url).await?,
+                ))
             }
             #[cfg(not(feature = "sqlite"))]
             anyhow::bail!("SQLite selected, but 'sqlite' feature is not enabled.")
-        },
+        }
         DatabaseKind::Postgres => {
             #[cfg(feature = "postgres")]
             {
                 info!("Connecting to PostgreSQL...");
-                Ok(WrappedPool::Postgres(sqlx::PgPool::connect(&config.url).await?))
+                Ok(WrappedPool::Postgres(
+                    sqlx::PgPool::connect(&config.url).await?,
+                ))
             }
             #[cfg(not(feature = "postgres"))]
             anyhow::bail!("PostgreSQL selected, but 'postgres' feature is not enabled.")

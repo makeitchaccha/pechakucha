@@ -1,37 +1,55 @@
-use std::collections::HashMap;
+use crate::handler::Data;
 use anyhow::anyhow;
 use fluent::FluentArgs;
-use include_dir::{include_dir, Dir};
-use crate::handler::Data;
+use include_dir::{Dir, include_dir};
+use std::collections::HashMap;
 
 type Error = anyhow::Error;
-type FluentBundle = fluent::bundle::FluentBundle<fluent::FluentResource, intl_memoizer::concurrent::IntlLangMemoizer>;
+type FluentBundle = fluent::bundle::FluentBundle<
+    fluent::FluentResource,
+    intl_memoizer::concurrent::IntlLangMemoizer,
+>;
 
 const TTS_LOCALES: Dir = include_dir!("$CARGO_MANIFEST_DIR/locales/tts");
 const DISCORD_LOCALES: Dir = include_dir!("$CARGO_MANIFEST_DIR/locales/discord");
 
 pub fn load_tts_locales(fallback: &str) -> Result<Locales, Error> {
-    load_from_static_dir(TTS_LOCALES, LocaleSearchPolicy::new_cascading(fallback.to_owned(), '-'))
+    load_from_static_dir(
+        TTS_LOCALES,
+        LocaleSearchPolicy::new_cascading(fallback.to_owned(), '-'),
+    )
 }
 
 pub fn load_discord_locales(fallback: &str) -> Result<Locales, Error> {
-    load_from_static_dir(DISCORD_LOCALES, LocaleSearchPolicy::new_exact(fallback.to_string()))
+    load_from_static_dir(
+        DISCORD_LOCALES,
+        LocaleSearchPolicy::new_exact(fallback.to_string()),
+    )
 }
 
 fn load_from_static_dir(dir: Dir, policy: LocaleSearchPolicy) -> Result<Locales, Error> {
     let mut bundles = HashMap::new();
 
     for file in dir.files() {
-        let locale = file.path()
-            .file_stem().ok_or(anyhow!("Invalid file name: '{}'", file.path().display()))?
-            .to_str().ok_or(anyhow!("Invalid unicode filename"))?;
+        let locale = file
+            .path()
+            .file_stem()
+            .ok_or(anyhow!("Invalid file name: '{}'", file.path().display()))?
+            .to_str()
+            .ok_or(anyhow!("Invalid unicode filename"))?;
 
-        let resource = fluent::FluentResource::try_new(file.contents_utf8().ok_or(anyhow!("Invalid file contents"))?.to_owned())
-            .map_err(|(_, e)| anyhow!("failed to parse {:?}: {:?}", file.path(), e))?;
+        let resource = fluent::FluentResource::try_new(
+            file.contents_utf8()
+                .ok_or(anyhow!("Invalid file contents"))?
+                .to_owned(),
+        )
+        .map_err(|(_, e)| anyhow!("failed to parse {:?}: {:?}", file.path(), e))?;
 
-        let mut bundle = FluentBundle::new_concurrent(vec![locale
-            .parse()
-            .map_err(|e| anyhow!("invalid locale `{}`: {}", locale, e))?]);
+        let mut bundle = FluentBundle::new_concurrent(vec![
+            locale
+                .parse()
+                .map_err(|e| anyhow!("invalid locale `{}`: {}", locale, e))?,
+        ]);
         bundle
             .add_resource(resource)
             .map_err(|e| anyhow!("failed to add resource to bundle: {:?}", e))?;
@@ -44,7 +62,7 @@ fn load_from_static_dir(dir: Dir, policy: LocaleSearchPolicy) -> Result<Locales,
 
 enum LocaleMatchingMode {
     Exact,
-    Cascading { delimiter: char }
+    Cascading { delimiter: char },
 }
 
 pub struct LocaleSearchPolicy {
@@ -56,7 +74,7 @@ impl LocaleSearchPolicy {
     fn new_cascading(fallback: String, delimiter: char) -> Self {
         Self {
             fallback,
-            mode: LocaleMatchingMode::Cascading { delimiter }
+            mode: LocaleMatchingMode::Cascading { delimiter },
         }
     }
 
@@ -67,14 +85,14 @@ impl LocaleSearchPolicy {
         }
     }
 
-    fn generate_candidates<'a>(&'a self, locale: &'a str) -> impl Iterator<Item=&'a str> {
+    fn generate_candidates<'a>(&'a self, locale: &'a str) -> impl Iterator<Item = &'a str> {
         let mut candidates = Vec::new();
         candidates.push(locale);
 
-        if let LocaleMatchingMode::Cascading { delimiter } = self.mode {
-            if let Some((language, _)) = locale.split_once(delimiter) {
-                candidates.push(language)
-            }
+        if let LocaleMatchingMode::Cascading { delimiter } = self.mode
+            && let Some((language, _)) = locale.split_once(delimiter)
+        {
+            candidates.push(language)
         }
 
         if !candidates.contains(&self.fallback.as_str()) {
@@ -91,12 +109,21 @@ pub struct Locales {
 }
 
 impl Locales {
-    pub fn new_with_bundles(search_policy: LocaleSearchPolicy, bundles: HashMap<String, FluentBundle>) -> Result<Self, Error> {
+    pub fn new_with_bundles(
+        search_policy: LocaleSearchPolicy,
+        bundles: HashMap<String, FluentBundle>,
+    ) -> Result<Self, Error> {
         if !bundles.contains_key(&search_policy.fallback) {
-            return Err(anyhow!("fallback locale {} not found", &search_policy.fallback));
+            return Err(anyhow!(
+                "fallback locale {} not found",
+                &search_policy.fallback
+            ));
         }
 
-        Ok(Self { search_policy, bundles })
+        Ok(Self {
+            search_policy,
+            bundles,
+        })
     }
 
     /// Resolves a localized message by searching through candidates according to the configured search policy.
@@ -110,7 +137,7 @@ impl Locales {
         locale: &str,
         id: &str,
         attr: Option<&str>,
-        args: Option<&FluentArgs>
+        args: Option<&FluentArgs>,
     ) -> Result<String, Error> {
         for candidate in self.search_policy.generate_candidates(locale) {
             let bundle = match self.bundles.get(candidate) {
@@ -135,7 +162,7 @@ impl Locales {
 
             let formatted = bundle.format_pattern(pattern, args, &mut vec![]);
 
-            return Ok(formatted.into_owned())
+            return Ok(formatted.into_owned());
         }
 
         Err(anyhow!("no fallback found for id '{}'", id))
@@ -170,24 +197,39 @@ impl Locales {
             // real-apply
             for (locale, bundle) in &self.bundles {
                 // Insert localized command name and description
-                let localized_command_name = match Self::format(bundle, &command.identifying_name, None, None) {
-                    Some(x) => x,
-                    None => continue, // no localization entry => skip localization
-                };
+                let localized_command_name =
+                    match Self::format(bundle, &command.identifying_name, None, None) {
+                        Some(x) => x,
+                        None => continue, // no localization entry => skip localization
+                    };
 
                 command
                     .name_localizations
                     .insert(locale.clone(), localized_command_name);
                 command.description_localizations.insert(
                     locale.clone(),
-                    Self::format(bundle, &command.identifying_name, Some("description"), None).ok_or(anyhow!("failed to format command description {}", command.identifying_name))?,
+                    Self::format(bundle, &command.identifying_name, Some("description"), None)
+                        .ok_or(anyhow!(
+                            "failed to format command description {}",
+                            command.identifying_name
+                        ))?,
                 );
 
                 for parameter in &mut command.parameters {
                     // Insert localized parameter name and description
                     parameter.name_localizations.insert(
                         locale.clone(),
-                        Self::format(bundle, &command.identifying_name, Some(&parameter.name), None).ok_or(anyhow!("failed to format parameter {} for command {}", parameter.name, command.identifying_name))?,
+                        Self::format(
+                            bundle,
+                            &command.identifying_name,
+                            Some(&parameter.name),
+                            None,
+                        )
+                        .ok_or(anyhow!(
+                            "failed to format parameter {} for command {}",
+                            parameter.name,
+                            command.identifying_name
+                        ))?,
                     );
                     parameter.description_localizations.insert(
                         locale.clone(),
@@ -197,14 +239,22 @@ impl Locales {
                             Some(&format!("{}-description", parameter.name)),
                             None,
                         )
-                            .ok_or(anyhow!("failed to format parameter description {} for command {}", parameter.name, command.identifying_name))?,
+                        .ok_or(anyhow!(
+                            "failed to format parameter description {} for command {}",
+                            parameter.name,
+                            command.identifying_name
+                        ))?,
                     );
 
                     // If this is a choice parameter, insert its localized variants
                     for choice in &mut parameter.choices {
                         choice.localizations.insert(
                             locale.clone(),
-                            Self::format(bundle, &choice.name, None, None).ok_or(anyhow!("failed to format choice {} for command {}", choice.name, command.identifying_name))?,
+                            Self::format(bundle, &choice.name, None, None).ok_or(anyhow!(
+                                "failed to format choice {} for command {}",
+                                choice.name,
+                                command.identifying_name
+                            ))?,
                         );
                     }
                 }
@@ -217,9 +267,9 @@ impl Locales {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use fluent::FluentResource;
     use super::{FluentBundle, LocaleMatchingMode, LocaleSearchPolicy, Locales};
+    use fluent::FluentResource;
+    use std::collections::HashMap;
 
     fn create_policy(fallback: &str, mode: LocaleMatchingMode) -> LocaleSearchPolicy {
         LocaleSearchPolicy {
@@ -283,37 +333,41 @@ mod tests {
     impl TestContext {
         fn new(search_policy: LocaleSearchPolicy, source: &str) -> Self {
             let mut bundles = HashMap::new();
-            let mut bundle = FluentBundle::new_concurrent(
-                vec![search_policy.fallback.parse().expect("must be valid")]
-            );
-            bundle.add_resource(FluentResource::try_new(source.to_owned()).expect("must parse")).expect("must add resource");
+            let mut bundle = FluentBundle::new_concurrent(vec![
+                search_policy.fallback.parse().expect("must be valid"),
+            ]);
+            bundle
+                .add_resource(FluentResource::try_new(source.to_owned()).expect("must parse"))
+                .expect("must add resource");
             bundles.insert(search_policy.fallback.to_owned(), bundle);
 
-            Self{
-                locales: Locales{
+            Self {
+                locales: Locales {
                     search_policy,
                     bundles,
-                }
+                },
             }
         }
 
         fn add_bundle(mut self, locale: &str, source: &str) -> Self {
-            let mut bundle = FluentBundle::new_concurrent(
-                vec![locale.parse().expect("must be valid")]
-            );
-            bundle.add_resource(FluentResource::try_new(source.to_owned()).expect("must parse")).expect("must add resource");
+            let mut bundle =
+                FluentBundle::new_concurrent(vec![locale.parse().expect("must be valid")]);
+            bundle
+                .add_resource(FluentResource::try_new(source.to_owned()).expect("must parse"))
+                .expect("must add resource");
             self.locales.bundles.insert(locale.to_owned(), bundle);
             self
         }
     }
 
-
     #[test]
     fn resolve_exact_one_first_if_key_existing_on_cascading() {
-        let ctx =
-            TestContext::new(LocaleSearchPolicy::new_cascading("fallback".to_string(), '-'), "key = value-fallback")
-                .add_bundle("en", "key = value-en")
-                .add_bundle("en-US", "key = value-en-US");
+        let ctx = TestContext::new(
+            LocaleSearchPolicy::new_cascading("fallback".to_string(), '-'),
+            "key = value-fallback",
+        )
+        .add_bundle("en", "key = value-en")
+        .add_bundle("en-US", "key = value-en-US");
 
         let result = ctx.locales.resolve("en-US", "key", None, None);
 
@@ -322,10 +376,12 @@ mod tests {
 
     #[test]
     fn resolve_prefixed_one_second_if_key_existing_on_cascading() {
-        let ctx =
-            TestContext::new(LocaleSearchPolicy::new_cascading("fallback".to_string(), '-'), "key = value-fallback")
-                .add_bundle("en", "key = value-en")
-                .add_bundle("en-US", "key = value-en-US");
+        let ctx = TestContext::new(
+            LocaleSearchPolicy::new_cascading("fallback".to_string(), '-'),
+            "key = value-fallback",
+        )
+        .add_bundle("en", "key = value-en")
+        .add_bundle("en-US", "key = value-en-US");
 
         let result = ctx.locales.resolve("en-GB", "key", None, None);
 
@@ -334,10 +390,12 @@ mod tests {
 
     #[test]
     fn resolve_fallback_finally_if_key_existing_on_cascading() {
-        let ctx =
-            TestContext::new(LocaleSearchPolicy::new_cascading("fallback".to_string(), '-'), "key = value-fallback")
-                .add_bundle("en", "key = value-en")
-                .add_bundle("en-US", "key = value-en-US");
+        let ctx = TestContext::new(
+            LocaleSearchPolicy::new_cascading("fallback".to_string(), '-'),
+            "key = value-fallback",
+        )
+        .add_bundle("en", "key = value-en")
+        .add_bundle("en-US", "key = value-en-US");
 
         let result = ctx.locales.resolve("ja", "key", None, None);
 
@@ -346,10 +404,12 @@ mod tests {
 
     #[test]
     fn fail_to_resolve_if_nonexistent_key_on_cascading() {
-        let ctx =
-            TestContext::new(LocaleSearchPolicy::new_cascading("fallback".to_string(), '-'), "key = value-fallback")
-                .add_bundle("en", "key = value-en")
-                .add_bundle("en-US", "key = value-en-US");
+        let ctx = TestContext::new(
+            LocaleSearchPolicy::new_cascading("fallback".to_string(), '-'),
+            "key = value-fallback",
+        )
+        .add_bundle("en", "key = value-en")
+        .add_bundle("en-US", "key = value-en-US");
 
         let result = ctx.locales.resolve("en-US", "no-key", None, None);
 
@@ -358,13 +418,17 @@ mod tests {
 
     #[test]
     fn resolve_attr_on_cascading() {
-        let ctx =
-            TestContext::new(LocaleSearchPolicy::new_cascading("fallback".to_string(), '-'), "key = value-fallback")
-                .add_bundle("en",
-                            r#"key = value-en
+        let ctx = TestContext::new(
+            LocaleSearchPolicy::new_cascading("fallback".to_string(), '-'),
+            "key = value-fallback",
+        )
+        .add_bundle(
+            "en",
+            r#"key = value-en
                                 .attr = attr-en
-                "#)
-                .add_bundle("en-US", "key = value-en-US");
+                "#,
+        )
+        .add_bundle("en-US", "key = value-en-US");
 
         let result = ctx.locales.resolve("en-US", "key", Some("attr"), None);
 
@@ -373,10 +437,12 @@ mod tests {
 
     #[test]
     fn fail_to_resolve_if_nonexistent_attr_on_cascading() {
-        let ctx =
-            TestContext::new(LocaleSearchPolicy::new_cascading("fallback".to_string(), '-'), "key = value-fallback")
-                .add_bundle("en", "key = value-en")
-                .add_bundle("en-US", "key = value-en-US");
+        let ctx = TestContext::new(
+            LocaleSearchPolicy::new_cascading("fallback".to_string(), '-'),
+            "key = value-fallback",
+        )
+        .add_bundle("en", "key = value-en")
+        .add_bundle("en-US", "key = value-en-US");
 
         let result = ctx.locales.resolve("en-US", "key", Some("no-attr"), None);
 

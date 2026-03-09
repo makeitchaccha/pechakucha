@@ -28,35 +28,44 @@ pub struct ResolvedProfile {
 
 impl ResolvedProfile {
     pub fn user_override(id: String) -> Self {
-        Self { id, source: ProfileSource::UserOverride }
+        Self {
+            id,
+            source: ProfileSource::UserOverride,
+        }
     }
 
     pub fn guild_default(id: String) -> Self {
-        Self { id, source: ProfileSource::GuildDefault }
+        Self {
+            id,
+            source: ProfileSource::GuildDefault,
+        }
     }
 
     pub fn global_fallback(id: String) -> Self {
-        Self { id, source: ProfileSource::GlobalFallback }
+        Self {
+            id,
+            source: ProfileSource::GlobalFallback,
+        }
     }
 }
 
 #[cfg(test)]
-mod test_utils{
-    use std::collections::HashMap;
-    use std::sync::Arc;
+mod test_utils {
+    use crate::profile::repository::ProfileRepository;
     use async_trait::async_trait;
     use poise::serenity_prelude::{GuildId, UserId};
+    use std::collections::HashMap;
+    use std::sync::Arc;
     use tokio::sync::Mutex;
-    use crate::profile::repository::ProfileRepository;
 
-    pub struct MockProfileRepository{
+    pub struct MockProfileRepository {
         user_profiles: Arc<Mutex<HashMap<UserId, String>>>,
         guild_profiles: Arc<Mutex<HashMap<GuildId, String>>>,
     }
 
-    impl MockProfileRepository{
-        pub fn new() -> Self{
-            Self{
+    impl MockProfileRepository {
+        pub fn new() -> Self {
+            Self {
                 user_profiles: Arc::new(Mutex::new(HashMap::new())),
                 guild_profiles: Arc::new(Mutex::new(HashMap::new())),
             }
@@ -64,7 +73,7 @@ mod test_utils{
     }
 
     #[async_trait]
-    impl ProfileRepository for MockProfileRepository{
+    impl ProfileRepository for MockProfileRepository {
         async fn find_by_user(&self, user_id: UserId) -> anyhow::Result<Option<String>> {
             Ok(self.user_profiles.lock().await.get(&user_id).cloned())
         }
@@ -74,12 +83,18 @@ mod test_utils{
         }
 
         async fn save_user(&self, user_id: UserId, profile_id: &str) -> anyhow::Result<()> {
-            self.user_profiles.lock().await.insert(user_id, profile_id.to_owned());
+            self.user_profiles
+                .lock()
+                .await
+                .insert(user_id, profile_id.to_owned());
             Ok(())
         }
 
         async fn save_guild(&self, guild_id: GuildId, profile_id: &str) -> anyhow::Result<()> {
-            self.guild_profiles.lock().await.insert(guild_id, profile_id.to_owned());
+            self.guild_profiles
+                .lock()
+                .await
+                .insert(guild_id, profile_id.to_owned());
             Ok(())
         }
 

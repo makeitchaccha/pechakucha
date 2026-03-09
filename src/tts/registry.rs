@@ -39,7 +39,8 @@ impl VoicePackageRegistry {
 
     /// find all prefixed
     pub fn find_prefixed_all(&self, prefix: &str) -> impl Iterator<Item = (&str, &VoicePackage)> {
-        self.packages.iter()
+        self.packages
+            .iter()
             .filter(move |&(_, package)| package.detail.name.starts_with(prefix))
             .map(|(id, voice)| (id.as_str(), voice))
     }
@@ -54,9 +55,7 @@ pub struct VoiceRegistryBuilder {
 impl VoiceRegistryBuilder {
     fn new(config: AppConfig) -> Self {
         let moka_cache = match &config.cache {
-            CacheConfig::InMemory(c) => {
-                Some(Cache::new(c.capacity))
-            },
+            CacheConfig::InMemory(c) => Some(Cache::new(c.capacity)),
             _ => None,
         };
 
@@ -76,7 +75,9 @@ impl VoiceRegistryBuilder {
         let mut voices = HashMap::new();
 
         for (id, profile) in &self.config.profiles {
-            let detail = profile.note.as_ref()
+            let detail = profile
+                .note
+                .as_ref()
                 .map(|config| config.resolve(profile.voice_backend.generate_default_detail(id)))
                 .unwrap_or_else(|| profile.voice_backend.generate_default_detail(id));
 
@@ -90,7 +91,7 @@ impl VoiceRegistryBuilder {
                         .clone();
 
                     self.wrap_with_cache(Box::new(GoogleCloudVoice::new(client, c.clone())))
-                },
+                }
             };
 
             voices.insert(id.to_string(), VoicePackage { voice, detail });
@@ -102,7 +103,13 @@ impl VoiceRegistryBuilder {
     fn wrap_with_cache(&self, voice: Box<dyn Voice>) -> Arc<dyn Voice> {
         match &self.config.cache {
             CacheConfig::Disabled => Arc::from(voice),
-            CacheConfig::InMemory(_) => Arc::new(CachedVoice::new(voice, self.moka_cache.as_ref().expect("moka cache must be set").clone())),
+            CacheConfig::InMemory(_) => Arc::new(CachedVoice::new(
+                voice,
+                self.moka_cache
+                    .as_ref()
+                    .expect("moka cache must be set")
+                    .clone(),
+            )),
         }
     }
 }
@@ -110,7 +117,9 @@ impl VoiceRegistryBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{CacheConfig, DatabaseConfig, DatabaseKind, InMemoryCacheConfig, ProfileConfig};
+    use crate::config::{
+        CacheConfig, DatabaseConfig, DatabaseKind, InMemoryCacheConfig, ProfileConfig,
+    };
     use crate::tts::google_cloud::GoogleCloudVoiceConfig;
 
     fn create_test_config(cache: CacheConfig) -> AppConfig {
@@ -124,12 +133,12 @@ mod tests {
                     name: Some("ja-JP-Wavenet-A".to_string()),
                     ..Default::default()
                 }),
-            }
+            },
         );
 
         AppConfig {
             bot: Default::default(),
-            database: DatabaseConfig{
+            database: DatabaseConfig {
                 kind: DatabaseKind::SQLite,
                 url: "".to_string(),
             },
@@ -140,12 +149,17 @@ mod tests {
     }
 
     async fn create_dummy_client() -> TextToSpeech {
-        TextToSpeech::builder().with_endpoint("http://localhost:0").build().await.unwrap()
+        TextToSpeech::builder()
+            .with_endpoint("http://localhost:0")
+            .build()
+            .await
+            .unwrap()
     }
 
     #[tokio::test]
     async fn test_build_with_cache_enabled() {
-        let config = create_test_config(CacheConfig::InMemory(InMemoryCacheConfig { capacity: 100 }));
+        let config =
+            create_test_config(CacheConfig::InMemory(InMemoryCacheConfig { capacity: 100 }));
         let client = create_dummy_client().await;
 
         let registry = VoicePackageRegistry::builder(config)
@@ -153,10 +167,19 @@ mod tests {
             .build()
             .expect("Should build successfully");
 
-        let voice = registry.get_voice("test_preset").expect("Preset should exist");
+        let voice = registry
+            .get_voice("test_preset")
+            .expect("Preset should exist");
 
-        assert!(voice.identifier().starts_with("cached"), "ID should start with cached: {}", voice.identifier());
-        assert!(voice.identifier().contains("google"), "ID should contain internal voice id");
+        assert!(
+            voice.identifier().starts_with("cached"),
+            "ID should start with cached: {}",
+            voice.identifier()
+        );
+        assert!(
+            voice.identifier().contains("google"),
+            "ID should contain internal voice id"
+        );
     }
 
     #[tokio::test]
@@ -169,10 +192,19 @@ mod tests {
             .build()
             .expect("Should build successfully");
 
-        let voice = registry.get_voice("test_preset").expect("Preset should exist");
+        let voice = registry
+            .get_voice("test_preset")
+            .expect("Preset should exist");
 
-        assert!(!voice.identifier().starts_with("cached"), "ID should NOT start with cached: {}", voice.identifier());
-        assert!(voice.identifier().starts_with("google"), "ID should start directly with google");
+        assert!(
+            !voice.identifier().starts_with("cached"),
+            "ID should NOT start with cached: {}",
+            voice.identifier()
+        );
+        assert!(
+            voice.identifier().starts_with("google"),
+            "ID should start directly with google"
+        );
     }
 
     #[tokio::test]
@@ -180,8 +212,7 @@ mod tests {
         let config = create_test_config(CacheConfig::Disabled);
 
         // build without client
-        let result = VoicePackageRegistry::builder(config)
-            .build();
+        let result = VoicePackageRegistry::builder(config).build();
         assert!(result.is_err());
     }
 }

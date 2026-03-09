@@ -29,7 +29,7 @@ pub struct VoiceDetail {
 /// Contrary with Source, Voice is a normalized audio
 /// trans-coded from source result.
 #[async_trait]
-pub trait Voice: Send + Sync{
+pub trait Voice: Send + Sync {
     fn identifier(&self) -> &str;
 
     /// Returns the language code associated with this voice.
@@ -45,8 +45,8 @@ pub trait Voice: Send + Sync{
 pub mod test_utils {
     use crate::tts::{Voice, VoiceError};
     use async_trait::async_trait;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[derive(Clone)]
     pub struct MockVoice {
@@ -55,11 +55,19 @@ pub mod test_utils {
 
     impl MockVoice {
         pub fn new() -> Self {
-            Self { call_count: Arc::new(AtomicUsize::new(0)) }
+            Self {
+                call_count: Arc::new(AtomicUsize::new(0)),
+            }
         }
 
         pub fn call_count(&self) -> usize {
             self.call_count.load(Ordering::SeqCst)
+        }
+    }
+
+    impl Default for MockVoice {
+        fn default() -> Self {
+            Self::new()
         }
     }
 
@@ -68,7 +76,7 @@ pub mod test_utils {
         fn identifier(&self) -> &str {
             "mock"
         }
-        
+
         fn language(&self) -> &str {
             "mock-language"
         }

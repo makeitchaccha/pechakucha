@@ -1,7 +1,7 @@
-mod session;
+mod link;
 mod moderation;
 mod profile;
-mod link;
+mod session;
 
 pub fn commands() -> Vec<poise::Command<crate::handler::Data, Error>> {
     vec![

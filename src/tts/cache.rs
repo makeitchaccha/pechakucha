@@ -1,8 +1,8 @@
 use crate::tts::{Voice, VoiceError};
 use async_trait::async_trait;
 use moka::future::Cache;
-use sha2::digest::Update;
 use sha2::Digest;
+use sha2::digest::Update;
 
 pub struct CachedVoice {
     identifier: String,
@@ -32,14 +32,23 @@ impl Voice for CachedVoice {
 
     async fn generate(&self, text: &str) -> Result<Vec<u8>, VoiceError> {
         tracing::debug!("cached-voice requested to generate: {}", text);
-        let key = hex::encode(sha2::Sha256::new().chain(self.identifier.as_bytes()).chain(text.as_bytes()).finalize());
+        let key = hex::encode(
+            sha2::Sha256::new()
+                .chain(self.identifier.as_bytes())
+                .chain(text.as_bytes())
+                .finalize(),
+        );
 
         if let Some(data) = self.cache.get(&key).await {
             tracing::debug!("cache hit for {} with key {}", &text, &key);
-            return Ok(data)
+            return Ok(data);
         }
 
-        tracing::debug!("cache miss for {} with key {}, delegate request", &text, &key);
+        tracing::debug!(
+            "cache miss for {} with key {}, delegate request",
+            &text,
+            &key
+        );
         let data = self.inner.generate(text).await?;
 
         self.cache.insert(key, data.clone()).await;
@@ -53,7 +62,6 @@ mod tests {
     use super::*;
     use crate::tts::test_utils::MockVoice;
 
-
     #[tokio::test]
     async fn test_cache_hit() {
         let mock = MockVoice::new();
@@ -65,7 +73,11 @@ mod tests {
         // in case of same text
         let result = cached_voice.generate(text).await.unwrap();
         assert_eq!(result.to_vec(), b"hello");
-        assert_eq!(mock.call_count(), 1, "First call should hit the inner voice");
+        assert_eq!(
+            mock.call_count(),
+            1,
+            "First call should hit the inner voice"
+        );
 
         let result = cached_voice.generate(text).await.unwrap();
         assert_eq!(result.to_vec(), b"hello");

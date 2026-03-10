@@ -9,6 +9,7 @@ use crate::{sanitizer, usecase};
 use anyhow::{Context, anyhow};
 use fluent::fluent_args;
 use poise::serenity_prelude as serenity;
+use poise::serenity_prelude::futures::future::join_all;
 use poise::serenity_prelude::{ChannelId, VoiceState};
 use std::sync::Arc;
 
@@ -100,20 +101,25 @@ pub async fn event_handler(
                     return Ok(());
                 };
 
-                let in_room_members_count = ctx
+                let human_check_tasks = ctx
                     .cache
                     .guild(guild_id)
-                    .ok_or(anyhow!("Guild not found"))?
+                    .ok_or_else(|| anyhow!("guild not found"))?
                     .voice_states
                     .iter()
-                    .filter(|(_, voice_state)| voice_state.channel_id == Some(old_channel_id))
-                    .filter(|&(&user_id, _)| {
-                        user_id != new.user_id
-                            && !user_id
-                                .to_user_cached(&ctx.cache)
-                                .map(|u| u.bot)
-                                .unwrap_or(true)
+                    .filter(|&(&user_id, voice_state)| {
+                        voice_state.channel_id == Some(old_channel_id) && user_id != new.user_id
                     })
+                    .map(|(&user_id, _)| {
+                        let ctx = ctx.clone();
+                        async move { user_id.to_user(ctx).await.map(|u| !u.bot).unwrap_or(false) }
+                    })
+                    .collect::<Vec<_>>();
+
+                let in_room_members_count = join_all(human_check_tasks)
+                    .await
+                    .into_iter()
+                    .filter(|&is_human| is_human)
                     .count();
 
                 // disconnect if all human members left voice channel.

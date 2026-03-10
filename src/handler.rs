@@ -129,14 +129,13 @@ pub async fn event_handler(
                     })
                     .collect::<Vec<_>>();
 
-                let in_room_members_count = join_all(human_check_tasks)
+                let has_other_members_in_room = join_all(human_check_tasks)
                     .await
                     .into_iter()
-                    .filter(|&is_human| is_human)
-                    .count();
+                    .any(|is_human| is_human);
 
                 // disconnect if all human members left voice channel.
-                if in_room_members_count == 0 {
+                if !has_other_members_in_room {
                     session.handle.leave().await?;
                 }
 

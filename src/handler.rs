@@ -88,8 +88,21 @@ pub async fn event_handler(
                 if let Some(binding) = data.binding_repository.find_binding(guild_id).await?
                     && binding.voice == new_channel_id
                 {
-                    usecase::session::start(ctx, data, guild_id, binding.text, binding.voice)
-                        .await?;
+                    // On connection, bot tries to detect first incoming user (either human or bot)
+                    let has_other_members_in_room = ctx
+                        .cache
+                        .guild(guild_id)
+                        .ok_or_else(|| anyhow!("guild not found"))?
+                        .voice_states
+                        .iter()
+                        .any(|(&user_id, voice_state)| {
+                            voice_state.channel_id == Some(new_channel_id) && user_id != new.user_id
+                        });
+
+                    if !has_other_members_in_room {
+                        usecase::session::start(ctx, data, guild_id, binding.text, binding.voice)
+                            .await?;
+                    }
                 }
 
                 Ok(())
@@ -116,14 +129,13 @@ pub async fn event_handler(
                     })
                     .collect::<Vec<_>>();
 
-                let in_room_members_count = join_all(human_check_tasks)
+                let has_other_members_in_room = join_all(human_check_tasks)
                     .await
                     .into_iter()
-                    .filter(|&is_human| is_human)
-                    .count();
+                    .any(|is_human| is_human);
 
                 // disconnect if all human members left voice channel.
-                if in_room_members_count == 0 {
+                if !has_other_members_in_room {
                     session.handle.leave().await?;
                 }
 

@@ -54,7 +54,8 @@ pub async fn guild(_ctx: Context<'_>) -> Result<()> {
 #[poise::command(
     slash_command,
     rename = "choose",
-    identifying_name = "voice-guild-choose"
+    identifying_name = "voice-guild-choose",
+    default_member_permissions = "MANAGE_GUILD"
 )]
 pub async fn guild_choose(
     ctx: Context<'_>,
@@ -67,7 +68,8 @@ pub async fn guild_choose(
 #[poise::command(
     slash_command,
     rename = "clear",
-    identifying_name = "voice-guild-clear"
+    identifying_name = "voice-guild-clear",
+    default_member_permissions = "MANAGE_GUILD"
 )]
 pub async fn guild_clear(ctx: Context<'_>) -> Result<()> {
     common_clear(ctx).await

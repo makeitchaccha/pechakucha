@@ -3,22 +3,14 @@ use anyhow::anyhow;
 use poise::serenity_prelude::AutocompleteChoice;
 use std::fmt::{Display, Formatter};
 
+/// Setting commands for user
 #[poise::command(
     slash_command,
     guild_only,
-    subcommands("user", "guild"),
-    subcommand_required
-)]
-pub async fn voice(_: Context<'_>) -> Result<()> {
-    Ok(())
-}
-
-#[poise::command(
-    slash_command,
     subcommands("user_choose", "user_clear"),
     subcommand_required
 )]
-pub async fn user(_ctx: Context<'_>) -> Result<()> {
+pub async fn voice(_: Context<'_>) -> Result<()> {
     Ok(())
 }
 
@@ -43,10 +35,12 @@ pub async fn user_clear(ctx: Context<'_>) -> Result<()> {
 
 #[poise::command(
     slash_command,
+    rename = "guild-voice",
     subcommands("guild_choose", "guild_clear"),
-    subcommand_required
+    subcommand_required,
+    default_member_permissions = "MANAGE_GUILD"
 )]
-pub async fn guild(_ctx: Context<'_>) -> Result<()> {
+pub async fn guild_voice(_ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 
@@ -54,8 +48,7 @@ pub async fn guild(_ctx: Context<'_>) -> Result<()> {
 #[poise::command(
     slash_command,
     rename = "choose",
-    identifying_name = "voice-guild-choose",
-    default_member_permissions = "MANAGE_GUILD"
+    identifying_name = "voice-guild-choose"
 )]
 pub async fn guild_choose(
     ctx: Context<'_>,
@@ -68,8 +61,7 @@ pub async fn guild_choose(
 #[poise::command(
     slash_command,
     rename = "clear",
-    identifying_name = "voice-guild-clear",
-    default_member_permissions = "MANAGE_GUILD"
+    identifying_name = "voice-guild-clear"
 )]
 pub async fn guild_clear(ctx: Context<'_>) -> Result<()> {
     common_clear(ctx).await

@@ -74,8 +74,13 @@ impl Client {
             .send()
             .await?;
 
-        let body: LazyAudioQuery = res.json().await?;
-        Ok(body)
+        if !res.status().is_success() {
+            let body = res.text().await?;
+            return Err(anyhow::anyhow!(body));
+        }
+
+        let audio_query: LazyAudioQuery = res.json().await?;
+        Ok(audio_query)
     }
 
     async fn synthesis(
@@ -93,6 +98,11 @@ impl Client {
             .json(&audio_query)
             .send()
             .await?;
+
+        if !res.status().is_success() {
+            let body = res.text().await?;
+            return Err(anyhow::anyhow!(body));
+        }
 
         Ok(res.bytes().await?.to_vec())
     }

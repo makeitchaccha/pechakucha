@@ -13,6 +13,7 @@ use reqwest::Url;
 use songbird::SerenityInit;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 use text_to_speech_rs::binding::BindingRepository;
 use text_to_speech_rs::config::{AppConfig, DatabaseConfig, DatabaseKind, load_config};
 use text_to_speech_rs::handler::event_handler;
@@ -124,7 +125,12 @@ async fn cli_run(
         && c.enabled
     {
         info!("Using Voicevox");
-        let client = voicevox::Client::new(reqwest::Client::new(), Url::parse(&c.url)?);
+        let client = voicevox::Client::new(
+            reqwest::ClientBuilder::new()
+                .timeout(Duration::from_secs(c.timeout))
+                .build()?,
+            Url::parse(&c.url)?,
+        );
 
         registry_builder = registry_builder.voicevox(client);
     }

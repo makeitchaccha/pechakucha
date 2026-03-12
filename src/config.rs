@@ -76,11 +76,11 @@ pub struct BackendConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct GoogleCloudBackendConfig {
     pub enabled: bool,
-    #[serde(default = "default_timeout")]
+    #[serde(default = "default_google_cloud_timeout")]
     pub timeout: u64,
 }
 
-fn default_timeout() -> u64 {
+fn default_google_cloud_timeout() -> u64 {
     5
 }
 
@@ -88,6 +88,12 @@ fn default_timeout() -> u64 {
 pub struct VoicevoxBackendConfig {
     pub enabled: bool,
     pub url: String,
+    #[serde(default = "default_voicevox_timeout")]
+    pub timeout: u64,
+}
+
+fn default_voicevox_timeout() -> u64 {
+    30
 }
 
 #[derive(Debug, Clone, Deserialize)]

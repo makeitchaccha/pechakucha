@@ -3,22 +3,14 @@ use anyhow::anyhow;
 use poise::serenity_prelude::AutocompleteChoice;
 use std::fmt::{Display, Formatter};
 
+/// Setting commands for user
 #[poise::command(
     slash_command,
     guild_only,
-    subcommands("user", "guild"),
-    subcommand_required
-)]
-pub async fn voice(_: Context<'_>) -> Result<()> {
-    Ok(())
-}
-
-#[poise::command(
-    slash_command,
     subcommands("user_choose", "user_clear"),
     subcommand_required
 )]
-pub async fn user(_ctx: Context<'_>) -> Result<()> {
+pub async fn voice(_: Context<'_>) -> Result<()> {
     Ok(())
 }
 
@@ -32,21 +24,24 @@ pub async fn user_choose(
     ctx: Context<'_>,
     #[autocomplete = "autocomplete_voice_name"] name: String,
 ) -> Result<()> {
-    common_choose(ctx, name).await
+    common_choose(ctx, Scope::User, name).await
 }
 
 /// Clear your reading voice
 #[poise::command(slash_command, rename = "clear", identifying_name = "voice-user-clear")]
 pub async fn user_clear(ctx: Context<'_>) -> Result<()> {
-    common_clear(ctx).await
+    common_clear(ctx, Scope::User).await
 }
 
 #[poise::command(
     slash_command,
+    guild_only,
+    rename = "guild-voice",
     subcommands("guild_choose", "guild_clear"),
-    subcommand_required
+    subcommand_required,
+    default_member_permissions = "MANAGE_GUILD"
 )]
-pub async fn guild(_ctx: Context<'_>) -> Result<()> {
+pub async fn guild_voice(_ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 
@@ -60,7 +55,7 @@ pub async fn guild_choose(
     ctx: Context<'_>,
     #[autocomplete = "autocomplete_voice_name"] name: String,
 ) -> Result<()> {
-    common_choose(ctx, name).await
+    common_choose(ctx, Scope::Guild, name).await
 }
 
 /// Clear guild default reading voice
@@ -70,7 +65,7 @@ pub async fn guild_choose(
     identifying_name = "voice-guild-clear"
 )]
 pub async fn guild_clear(ctx: Context<'_>) -> Result<()> {
-    common_clear(ctx).await
+    common_clear(ctx, Scope::Guild).await
 }
 
 enum Scope {
@@ -84,18 +79,6 @@ impl Display for Scope {
             Scope::User => write!(f, "user"),
             Scope::Guild => write!(f, "guild"),
         }
-    }
-}
-
-fn find_scope(ctx: Context<'_>) -> Result<Scope> {
-    let scope = ctx
-        .parent_commands()
-        .last()
-        .ok_or(anyhow!("missing parent"))?;
-    match scope.name.as_str() {
-        "user" => Ok(Scope::User),
-        "guild" => Ok(Scope::Guild),
-        _ => anyhow::bail!("unknown option"),
     }
 }
 
@@ -118,9 +101,7 @@ async fn autocomplete_voice_name(
     })
 }
 
-pub async fn common_choose(ctx: Context<'_>, name: String) -> Result<()> {
-    let scope = find_scope(ctx)?;
-
+async fn common_choose(ctx: Context<'_>, scope: Scope, name: String) -> Result<()> {
     if ctx.data().registry.get_voice(name.as_str()).is_none() {
         return Err(anyhow::anyhow!(format!("voice {} not found", name)));
     }
@@ -146,9 +127,7 @@ pub async fn common_choose(ctx: Context<'_>, name: String) -> Result<()> {
     Ok(())
 }
 
-pub async fn common_clear(ctx: Context<'_>) -> Result<()> {
-    let scope = find_scope(ctx)?;
-
+async fn common_clear(ctx: Context<'_>, scope: Scope) -> Result<()> {
     match scope {
         Scope::User => {
             ctx.data().repository.delete_user(ctx.author().id).await?;

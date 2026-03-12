@@ -11,6 +11,7 @@ pub fn commands() -> Vec<poise::Command<crate::handler::Data, Error>> {
         link::unlink(),
         moderation::register(),
         profile::voice(),
+        profile::guild_voice(),
     ]
 }
 

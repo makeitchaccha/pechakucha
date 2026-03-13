@@ -202,7 +202,7 @@ pub async fn event_handler(
                     &new_message.mentions,
                     &new_message.mention_roles,
                     &new_message.mention_channels,
-                )?;
+                );
                 let text = text_preprocessor::preprocess(&text, 300);
 
                 let name = guild_id

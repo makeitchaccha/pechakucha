@@ -1,4 +1,3 @@
-use anyhow::anyhow;
 use poise::serenity_prelude as serenity;
 use poise::serenity_prelude::{ChannelMention, GuildId, Mentionable, RoleId, User};
 use regex::Regex;

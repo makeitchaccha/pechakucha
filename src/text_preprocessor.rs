@@ -7,7 +7,7 @@ use tracing::warn;
 static URL_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"https?://\S+").unwrap());
 static EMOJI_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<a?:(\w+):\d+>").unwrap());
 static CODE_BLOCK_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"```(?:\w*\n)?(.*?)```").unwrap());
+    LazyLock::new(|| Regex::new(r"(?ms)```(?:\w*\n)?(.*?)```").unwrap());
 
 pub fn normalize_mentions(
     content: &str,

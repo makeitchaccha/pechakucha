@@ -3,6 +3,7 @@ use poise::serenity_prelude as serenity;
 use poise::serenity_prelude::{ChannelMention, GuildId, Mentionable, RoleId, User};
 use regex::Regex;
 use std::sync::LazyLock;
+use tracing::warn;
 
 static URL_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"https?://\S+").unwrap());
 static EMOJI_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<a?:(\w+):\d+>").unwrap());
@@ -16,12 +17,14 @@ pub fn normalize_mentions(
     users: &[User],
     roles: &[RoleId],
     channels: &[ChannelMention],
-) -> anyhow::Result<String> {
+) -> String {
     let mut content = content.to_string();
 
-    let guild = guild_id
-        .to_guild_cached(&ctx.cache)
-        .ok_or(anyhow!("Guild not found"))?;
+    let Some(guild) = guild_id.to_guild_cached(&ctx.cache) else {
+        warn!("Failed to replace mentions: no guild found in cache.");
+
+        return content;
+    };
 
     for user in users {
         content = content.replace(
@@ -29,25 +32,28 @@ pub fn normalize_mentions(
             guild
                 .members
                 .get(&user.id)
-                .ok_or(anyhow!("User does not exist"))?
-                .display_name(),
+                .map(|member| member.display_name())
+                .unwrap_or(user.display_name()),
         );
     }
-    for role in roles {
+    for role_id in roles {
         content = content.replace(
-            role.mention().to_string().as_str(),
-            &guild
+            role_id.mention().to_string().as_str(),
+            guild
                 .roles
-                .get(role)
-                .ok_or(anyhow!("Failed to get roles from cache"))?
-                .name,
+                .get(role_id)
+                .map(|role| role.name.as_str())
+                .unwrap_or("role"),
         );
     }
     for channel in channels {
-        content = content.replace(channel.id.mention().to_string().as_str(), &channel.name);
+        content = content.replace(
+            channel.id.mention().to_string().as_str(),
+            channel.name.as_str(),
+        );
     }
 
-    Ok(content)
+    content
 }
 
 pub fn normalize_urls(content: &str) -> String {

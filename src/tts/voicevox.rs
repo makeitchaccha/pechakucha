@@ -115,7 +115,7 @@ impl VoicevoxVoiceConfig {
     pub fn generate_default_detail(&self, key: &str) -> VoiceDetail {
         VoiceDetail {
             name: key.to_string(),
-            provider: "Voicevox".to_string(),
+            provider: "VOICEVOX".to_string(),
             description: None,
         }
     }

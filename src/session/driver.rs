@@ -1,4 +1,4 @@
-use crate::session::SessionCommand;
+use crate::session::SessionControl;
 use async_trait::async_trait;
 use songbird::{Call, CoreEvent, Event, EventContext, EventHandler, TrackEvent};
 use std::sync::Arc;
@@ -6,13 +6,15 @@ use tokio::sync::{Mutex, mpsc};
 
 #[async_trait]
 pub trait AudioDriver: Sync + Send {
-    async fn enqueue(&self, audios: Vec<Vec<u8>>);
+    async fn enqueue(
+        &self,
+        audios: Vec<Vec<u8>>,
+        utterance_done: mpsc::Sender<()>,
+    ) -> anyhow::Result<()>;
 
     async fn leave(&self) -> anyhow::Result<()>;
 
-    async fn subscribe_to_end_event(&self, tx: mpsc::Sender<()>);
-
-    async fn subscribe_to_disconnect_event(&self, tx: mpsc::Sender<SessionCommand>);
+    async fn subscribe_to_disconnect_event(&self, tx: mpsc::Sender<SessionControl>);
 }
 
 pub struct SongbirdDriver {
@@ -33,11 +35,28 @@ impl<T: Send + Sync + Clone> EventHandler for SongbirdEventHandler<T> {
 
 #[async_trait]
 impl AudioDriver for SongbirdDriver {
-    async fn enqueue(&self, data: Vec<Vec<u8>>) {
+    async fn enqueue(
+        &self,
+        data: Vec<Vec<u8>>,
+        utterance_done: mpsc::Sender<()>,
+    ) -> anyhow::Result<()> {
         let mut call = self.call.lock().await;
-        for audio in data {
-            call.enqueue_input(audio.into()).await;
+        let last_index = data.len().saturating_sub(1);
+        for (index, audio) in data.into_iter().enumerate() {
+            let track = call.enqueue_input(audio.into()).await;
+            if index == last_index {
+                track
+                    .add_event(
+                        Event::Track(TrackEvent::End),
+                        SongbirdEventHandler {
+                            tx: utterance_done.clone(),
+                            result: (),
+                        },
+                    )
+                    .map_err(|e| anyhow::anyhow!("Failed to subscribe to utterance end: {e}"))?;
+            }
         }
+        Ok(())
     }
 
     async fn leave(&self) -> anyhow::Result<()> {
@@ -46,21 +65,13 @@ impl AudioDriver for SongbirdDriver {
         Ok(())
     }
 
-    async fn subscribe_to_end_event(&self, tx: mpsc::Sender<()>) {
-        let mut call = self.call.lock().await;
-        call.add_global_event(
-            Event::Track(TrackEvent::End),
-            SongbirdEventHandler { tx, result: () },
-        );
-    }
-
-    async fn subscribe_to_disconnect_event(&self, tx: mpsc::Sender<SessionCommand>) {
+    async fn subscribe_to_disconnect_event(&self, tx: mpsc::Sender<SessionControl>) {
         let mut call = self.call.lock().await;
         call.add_global_event(
             Event::Core(CoreEvent::DriverDisconnect),
             SongbirdEventHandler {
                 tx,
-                result: SessionCommand::Disconnect,
+                result: SessionControl::Disconnected,
             },
         );
     }

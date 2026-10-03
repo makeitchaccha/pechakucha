@@ -1,8 +1,9 @@
-use crate::tts::{Voice, VoiceError};
+use crate::tts::{AudioOutput, Voice, VoiceError};
 use async_trait::async_trait;
 use moka::future::Cache;
 use sha2::Digest;
 use sha2::digest::Update;
+use tokio::sync::mpsc;
 
 pub struct CachedVoice {
     identifier: String,
@@ -30,7 +31,7 @@ impl Voice for CachedVoice {
         self.inner.language()
     }
 
-    async fn generate(&self, text: &str) -> Result<Vec<u8>, VoiceError> {
+    async fn generate(&self, text: &str) -> Result<AudioOutput, VoiceError> {
         tracing::debug!("cached-voice requested to generate: {}", text);
         let key = hex::encode(
             sha2::Sha256::new()
@@ -41,7 +42,7 @@ impl Voice for CachedVoice {
 
         if let Some(data) = self.cache.get(&key).await {
             tracing::debug!("cache hit for {} with key {}", &text, &key);
-            return Ok(data);
+            return Ok(AudioOutput::Buffered(data.into()));
         }
 
         tracing::debug!(
@@ -49,11 +50,35 @@ impl Voice for CachedVoice {
             &text,
             &key
         );
-        let data = self.inner.generate(text).await?;
-
-        self.cache.insert(key, data.clone()).await;
-
-        Ok(data)
+        match self.inner.generate(text).await? {
+            AudioOutput::Buffered(data) => {
+                self.cache.insert(key, data.to_vec()).await;
+                Ok(AudioOutput::Buffered(data))
+            }
+            AudioOutput::Stream { mut chunks, timing } => {
+                let (tx, rx) = mpsc::channel(8);
+                let cache = self.cache.clone();
+                tokio::spawn(async move {
+                    let mut cached_audio = Vec::new();
+                    while let Some(chunk) = chunks.recv().await {
+                        match chunk {
+                            Ok(bytes) => {
+                                cached_audio.extend_from_slice(&bytes);
+                                if tx.send(Ok(bytes)).await.is_err() {
+                                    return;
+                                }
+                            }
+                            Err(error) => {
+                                let _ = tx.send(Err(error)).await;
+                                return;
+                            }
+                        }
+                    }
+                    cache.insert(key, cached_audio).await;
+                });
+                Ok(AudioOutput::Stream { chunks: rx, timing })
+            }
+        }
     }
 }
 
@@ -72,7 +97,7 @@ mod tests {
 
         // in case of same text
         let result = cached_voice.generate(text).await.unwrap();
-        assert_eq!(result.to_vec(), b"hello");
+        assert_eq!(result.into_bytes().await.unwrap().as_ref(), b"hello");
         assert_eq!(
             mock.call_count(),
             1,
@@ -80,7 +105,7 @@ mod tests {
         );
 
         let result = cached_voice.generate(text).await.unwrap();
-        assert_eq!(result.to_vec(), b"hello");
+        assert_eq!(result.into_bytes().await.unwrap().as_ref(), b"hello");
         assert_eq!(mock.call_count(), 1, "Second call should hit the cache");
 
         // different text

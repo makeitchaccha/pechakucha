@@ -143,7 +143,7 @@ impl SessionActor {
         driver: Arc<dyn AudioDriver>,
         utterance_done: mpsc::Sender<()>,
     ) -> anyhow::Result<()> {
-        let mut audios = Vec::new();
+        let mut outputs = Vec::new();
         let mut texts = Vec::new();
         if let Some(announcement) = utterance.speaker_announcement {
             texts.push(announcement);
@@ -155,9 +155,9 @@ impl SessionActor {
                 Ok(data) => data,
                 Err(e) => return Err(anyhow::anyhow!(e).context("Failed to generate voice")),
             };
-            audios.push(audio_data);
+            outputs.push(audio_data);
         }
 
-        driver.enqueue(audios, utterance_done).await
+        driver.enqueue_outputs(outputs, utterance_done).await
     }
 }

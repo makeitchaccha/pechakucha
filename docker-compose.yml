@@ -1,13 +1,25 @@
 services:
   postgres:
     image: postgres:18
+    profiles: ["postgres"]
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:-pechakucha}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pechakucha-dev}
+      POSTGRES_DB: ${POSTGRES_DB:-pechakucha}
     volumes:
       - "pg-data:/var/lib/postgresql/18/docker"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  voicevox:
+    image: localhost/local/voicevox-engine-master:bfa9303
+    entrypoint: ["/opt/voicevox_engine/run"]
+    command: ["--host", "0.0.0.0", "--port", "50021", "--no-use_gpu"]
+    ports:
+      - "127.0.0.1:50022:50021"
 volumes:
   pg-data:

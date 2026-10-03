@@ -1,4 +1,4 @@
-use crate::tts::{DISCORD_SAMPLE_RATE, Voice, VoiceDetail, VoiceError};
+use crate::tts::{AudioOutput, DISCORD_SAMPLE_RATE, Voice, VoiceDetail, VoiceError};
 use async_trait::async_trait;
 use google_cloud_texttospeech_v1::client::TextToSpeech;
 use google_cloud_texttospeech_v1::model::{
@@ -142,7 +142,7 @@ impl Voice for GoogleCloudVoice {
         self.voice_selection_params.language_code.as_str()
     }
 
-    async fn generate(&self, text: &str) -> Result<Vec<u8>, VoiceError> {
+    async fn generate(&self, text: &str) -> Result<AudioOutput, VoiceError> {
         tracing::debug!("google cloud voice requested to generate: {}", text);
         let response = match self
             .client
@@ -157,7 +157,7 @@ impl Voice for GoogleCloudVoice {
             Err(err) => return Err(VoiceError::Api(err.into())),
         };
 
-        Ok(response.audio_content.to_vec())
+        Ok(AudioOutput::Buffered(response.audio_content.into()))
     }
 }
 

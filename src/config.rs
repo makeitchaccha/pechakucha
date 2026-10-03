@@ -44,12 +44,21 @@ impl AppConfig {
         }
 
         if let Some(voicevox) = &self.backend.voicevox
-            && (!voicevox.streaming.buffer_sigma.is_finite()
-                || voicevox.streaming.buffer_sigma < 0.0)
         {
-            return Err(anyhow!(
-                "backend.voicevox.streaming.buffer_sigma must be a finite number greater than or equal to 0.0"
-            ));
+            if !voicevox.streaming.buffer_sigma.is_finite()
+                || voicevox.streaming.buffer_sigma < 0.0
+            {
+                return Err(anyhow!(
+                    "backend.voicevox.streaming.buffer_sigma must be a finite number greater than or equal to 0.0"
+                ));
+            }
+            if !voicevox.streaming.segment_length.is_finite()
+                || voicevox.streaming.segment_length <= 0.0
+            {
+                return Err(anyhow!(
+                    "backend.voicevox.streaming.segment_length must be a finite number greater than 0.0"
+                ));
+            }
         }
 
         Ok(())
@@ -108,6 +117,7 @@ pub struct VoicevoxBackendConfig {
 pub struct VoicevoxStreamingConfig {
     pub enabled: bool,
     pub buffer_sigma: f64,
+    pub segment_length: f64,
 }
 
 impl Default for VoicevoxStreamingConfig {
@@ -115,6 +125,7 @@ impl Default for VoicevoxStreamingConfig {
         Self {
             enabled: false,
             buffer_sigma: 2.0,
+            segment_length: 3.0,
         }
     }
 }

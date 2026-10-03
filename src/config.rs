@@ -39,7 +39,7 @@ impl AppConfig {
         if !self.profiles.contains_key(&self.bot.global_profile) {
             return Err(anyhow!(
                 "No profile matched for {}, specified for global_profile",
-                &self.bot.global_profile
+                self.bot.global_profile
             ));
         }
 

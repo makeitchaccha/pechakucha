@@ -157,7 +157,7 @@ impl Voice for GoogleCloudVoice {
             Err(err) => return Err(VoiceError::Api(err.into())),
         };
 
-        Ok(AudioOutput::Buffered(response.audio_content.into()))
+        Ok(AudioOutput::Buffered(response.audio_content))
     }
 }
 

@@ -81,8 +81,9 @@ impl AudioOutput {
 
 #[cfg(test)]
 pub mod test_utils {
-    use crate::tts::{Voice, VoiceError};
+    use crate::tts::{AudioOutput, Voice, VoiceError};
     use async_trait::async_trait;
+    use bytes::Bytes;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 

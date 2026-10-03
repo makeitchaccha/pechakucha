@@ -116,7 +116,7 @@ impl Locales {
         if !bundles.contains_key(&search_policy.fallback) {
             return Err(anyhow!(
                 "fallback locale {} not found",
-                &search_policy.fallback
+                search_policy.fallback
             ));
         }
 

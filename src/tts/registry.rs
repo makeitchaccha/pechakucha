@@ -298,6 +298,6 @@ mod tests {
         // "nonexistent" should not match
         let keywords = vec!["nonexistent"];
         let results: Vec<_> = registry.find_matching_keywords(&keywords).collect();
-        assert_eq!(results.is_empty(), true);
+        assert!(results.is_empty());
     }
 }

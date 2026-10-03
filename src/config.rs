@@ -39,7 +39,7 @@ impl AppConfig {
         if !self.profiles.contains_key(&self.bot.global_profile) {
             return Err(anyhow!(
                 "No profile matched for {}, specified for global_profile",
-                &self.bot.global_profile
+                self.bot.global_profile
             ));
         }
 
@@ -90,10 +90,16 @@ pub struct VoicevoxBackendConfig {
     pub url: String,
     #[serde(default = "default_voicevox_timeout")]
     pub timeout: u64,
+    #[serde(default = "default_voicevox_streaming_synthesis")]
+    pub streaming_synthesis: bool,
 }
 
 fn default_voicevox_timeout() -> u64 {
     30
+}
+
+fn default_voicevox_streaming_synthesis() -> bool {
+    false
 }
 
 #[derive(Debug, Clone, Deserialize)]

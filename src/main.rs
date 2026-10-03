@@ -126,10 +126,10 @@ async fn cli_run(
     {
         info!("Using Voicevox");
         let client = voicevox::Client::new(
-            reqwest::ClientBuilder::new()
-                .timeout(Duration::from_secs(c.timeout))
-                .build()?,
+            reqwest::ClientBuilder::new().build()?,
             Url::parse(&c.url)?,
+            Duration::from_secs(c.timeout),
+            c.streaming_synthesis,
         );
 
         registry_builder = registry_builder.voicevox(client);

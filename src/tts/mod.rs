@@ -4,6 +4,8 @@ pub mod registry;
 pub mod voicevox;
 
 use async_trait::async_trait;
+use bytes::Bytes;
+use tokio::sync::mpsc;
 
 use thiserror::Error;
 
@@ -39,13 +41,49 @@ pub trait Voice: Send + Sync {
     /// depending on the requirements of the localization system.
     fn language(&self) -> &str;
 
-    async fn generate(&self, text: &str) -> Result<Vec<u8>, VoiceError>;
+    async fn generate(&self, text: &str) -> Result<AudioOutput, VoiceError>;
+}
+
+/// Audio produced by a voice. Stream chunks are consecutive bytes of one audio
+/// container; chunk boundaries do not imply codec or frame boundaries.
+pub enum AudioOutput {
+    Buffered(Bytes),
+    Stream {
+        chunks: mpsc::Receiver<Result<Bytes, VoiceError>>,
+        timing: StreamTimingProfile,
+    },
+}
+
+/// Voice-specific measured stream timing data for playback policy.
+#[derive(Clone, Debug, Default)]
+pub struct StreamTimingProfile {
+    pub first_audio_latency: Option<std::time::Duration>,
+    pub chunk_audio_duration: Option<std::time::Duration>,
+    /// Largest observed gap between chunks in the available measurements.
+    pub max_chunk_arrival: Option<std::time::Duration>,
+    pub sample_count: u64,
+}
+
+impl AudioOutput {
+    pub async fn into_bytes(self) -> Result<Bytes, VoiceError> {
+        match self {
+            Self::Buffered(bytes) => Ok(bytes),
+            Self::Stream { mut chunks, .. } => {
+                let mut output = Vec::new();
+                while let Some(chunk) = chunks.recv().await {
+                    output.extend_from_slice(&chunk?);
+                }
+                Ok(Bytes::from(output))
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 pub mod test_utils {
-    use crate::tts::{Voice, VoiceError};
+    use crate::tts::{AudioOutput, Voice, VoiceError};
     use async_trait::async_trait;
+    use bytes::Bytes;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -82,9 +120,11 @@ pub mod test_utils {
             "mock-language"
         }
 
-        async fn generate(&self, text: &str) -> Result<Vec<u8>, VoiceError> {
+        async fn generate(&self, text: &str) -> Result<AudioOutput, VoiceError> {
             self.call_count.fetch_add(1, Ordering::SeqCst);
-            Ok(text.as_bytes().to_vec())
+            Ok(AudioOutput::Buffered(Bytes::copy_from_slice(
+                text.as_bytes(),
+            )))
         }
     }
 }

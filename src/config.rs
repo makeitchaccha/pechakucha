@@ -43,10 +43,8 @@ impl AppConfig {
             ));
         }
 
-        if let Some(voicevox) = &self.backend.voicevox
-        {
-            if !voicevox.streaming.buffer_sigma.is_finite()
-                || voicevox.streaming.buffer_sigma < 0.0
+        if let Some(voicevox) = &self.backend.voicevox {
+            if !voicevox.streaming.buffer_sigma.is_finite() || voicevox.streaming.buffer_sigma < 0.0
             {
                 return Err(anyhow!(
                     "backend.voicevox.streaming.buffer_sigma must be a finite number greater than or equal to 0.0"

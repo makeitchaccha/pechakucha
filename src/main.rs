@@ -131,6 +131,7 @@ async fn cli_run(
             Duration::from_secs(c.timeout),
             c.streaming.enabled,
             c.streaming.buffer_sigma,
+            c.streaming.segment_length,
         );
 
         registry_builder = registry_builder.voicevox(client);

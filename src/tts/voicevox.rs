@@ -107,6 +107,7 @@ pub struct Client {
     request_timeout: std::time::Duration,
     streaming_synthesis: bool,
     buffer_sigma: f64,
+    segment_length: f64,
 }
 
 impl Client {
@@ -116,6 +117,7 @@ impl Client {
         request_timeout: std::time::Duration,
         streaming_synthesis: bool,
         buffer_sigma: f64,
+        segment_length: f64,
     ) -> Client {
         Client {
             http,
@@ -123,6 +125,7 @@ impl Client {
             request_timeout,
             streaming_synthesis,
             buffer_sigma,
+            segment_length,
         }
     }
 
@@ -384,14 +387,13 @@ impl Voice for VoicevoxVoice {
             return Ok(AudioOutput::Buffered(bytes.into()));
         }
 
-        // `segment_length` is the target duration, in seconds, for each
-        // Engine-generated segment. Measurements showed 3 seconds gave a
-        // useful balance between first audio latency and total synthesis time.
-        let segment_length = 3.0;
+        // `segment_length` is the configured target duration, in seconds, for
+        // each Engine-generated segment.
+        let segment_length = self.client.segment_length;
         tracing::debug!(
             speaker_id = self.config.speaker_id,
             segment_length_secs = segment_length,
-            "Using fixed VOICEVOX streaming segment length"
+            "Using configured VOICEVOX streaming segment length"
         );
 
         let estimated_audio_duration = audio_query.estimated_audio_duration();

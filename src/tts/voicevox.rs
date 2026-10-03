@@ -60,6 +60,7 @@ pub struct Client {
     http: reqwest::Client,
     base_url: reqwest::Url,
     request_timeout: std::time::Duration,
+    streaming_synthesis: bool,
 }
 
 impl Client {
@@ -67,11 +68,13 @@ impl Client {
         http: reqwest::Client,
         base_url: reqwest::Url,
         request_timeout: std::time::Duration,
+        streaming_synthesis: bool,
     ) -> Client {
         Client {
             http,
             base_url,
             request_timeout,
+            streaming_synthesis,
         }
     }
 
@@ -117,6 +120,26 @@ impl Client {
             .error_for_status()?;
 
         Ok(response)
+    }
+
+    async fn synthesis(
+        &self,
+        speaker: i32,
+        audio_query: LazyAudioQuery,
+    ) -> anyhow::Result<Vec<u8>> {
+        let url = self.base_url.join("/synthesis")?;
+        let request = self
+            .http
+            .post(url)
+            .query(&[("speaker", speaker.to_string())])
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .header(reqwest::header::ACCEPT, "audio/wav")
+            .json(&audio_query);
+        let response = tokio::time::timeout(self.request_timeout, request.send())
+            .await??
+            .error_for_status()?;
+        let bytes = response.bytes().await?;
+        Ok(bytes.to_vec())
     }
 }
 
@@ -183,6 +206,15 @@ impl Voice for VoicevoxVoice {
             .map_err(VoiceError::Api)?;
 
         audio_query.apply_config(&self.config);
+
+        if !self.client.streaming_synthesis {
+            let bytes = self
+                .client
+                .synthesis(self.config.speaker_id, audio_query)
+                .await
+                .map_err(VoiceError::Api)?;
+            return Ok(AudioOutput::Buffered(bytes.into()));
+        }
 
         // `segment_length` is the target duration, in seconds, for each
         // Engine-generated segment. Measurements showed 3 seconds gave a

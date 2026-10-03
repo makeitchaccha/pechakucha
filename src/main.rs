@@ -129,7 +129,8 @@ async fn cli_run(
             reqwest::ClientBuilder::new().build()?,
             Url::parse(&c.url)?,
             Duration::from_secs(c.timeout),
-            c.streaming_synthesis,
+            c.streaming.enabled,
+            c.streaming.buffer_sigma,
         );
 
         registry_builder = registry_builder.voicevox(client);

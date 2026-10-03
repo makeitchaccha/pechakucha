@@ -186,14 +186,14 @@ impl AudioDriver for SongbirdDriver {
                 AudioOutput::Buffered(bytes) => (bytes.to_vec().into(), None),
                 AudioOutput::Stream { chunks, timing } => {
                     let stream_report = StreamPlaybackReport::from_timing(&timing);
-                    let fallback_wait = timing
-                        .estimated_remaining_receive_time
-                        .map(|duration| {
-                            (duration.as_secs_f64() + receive_time_margin(&timing, 0))
-                                .clamp(0.25, 60.0)
-                        })
-                        .map(Duration::from_secs_f64)
-                        .unwrap_or(Duration::from_millis(500));
+                    let fallback_wait =
+                        estimated_remaining_receive_time(&timing, tokio::time::Instant::now())
+                            .map(|duration| {
+                                (duration.as_secs_f64() + receive_time_margin(&timing, 0))
+                                    .clamp(0.25, 60.0)
+                            })
+                            .map(Duration::from_secs_f64)
+                            .unwrap_or(Duration::from_millis(500));
                     let buffer_future = buffer_for_startup(chunks, &timing, fallback_wait);
                     let (buffered_chunks, chunks) = if let Some(span) = timing.span.clone() {
                         buffer_future.instrument(span).await
@@ -301,13 +301,11 @@ async fn buffer_for_startup(
     let mut buffered = Vec::new();
     let mut received_bytes = 0u64;
     loop {
-        if let (Some(completion), Some(total_playback_duration)) = (
-            timing.estimated_receive_completion,
+        if let (Some(remaining_receive), Some(total_playback_duration)) = (
+            estimated_remaining_receive_time(timing, tokio::time::Instant::now()),
             timing.total_audio_playback_duration,
         ) {
             let pcm_bytes = received_bytes.saturating_sub(WAV_HEADER_BYTES);
-            let remaining_receive =
-                completion.saturating_duration_since(tokio::time::Instant::now());
             let error_margin = receive_time_margin(timing, pcm_bytes);
             let adjusted_remaining = remaining_receive.as_secs_f64() + error_margin;
             let playback_margin = total_playback_duration
@@ -358,9 +356,8 @@ async fn buffer_for_startup(
         }
 
         if tokio::time::Instant::now() >= max_deadline {
-            let remaining_receive = timing.estimated_receive_completion.map(|completion| {
-                completion.saturating_duration_since(tokio::time::Instant::now())
-            });
+            let remaining_receive =
+                estimated_remaining_receive_time(timing, tokio::time::Instant::now());
             let playback_margin = timing.total_audio_playback_duration.map(|duration| {
                 duration.saturating_sub(timing.chunk_audio_duration.unwrap_or_default())
             });
@@ -456,6 +453,14 @@ fn rounded_secs(duration: Duration) -> f64 {
 
 fn round_secs_f64(seconds: f64) -> f64 {
     (seconds * 100.0).round() / 100.0
+}
+
+fn estimated_remaining_receive_time(
+    timing: &crate::tts::StreamTimingProfile,
+    now: tokio::time::Instant,
+) -> Option<Duration> {
+    let elapsed = now.checked_duration_since(timing.request_started_at?)?;
+    Some(timing.estimated_total_receive_time?.saturating_sub(elapsed))
 }
 
 fn receive_time_margin(timing: &crate::tts::StreamTimingProfile, pcm_bytes: u64) -> f64 {

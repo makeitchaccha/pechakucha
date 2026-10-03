@@ -468,8 +468,6 @@ impl Voice for VoicevoxVoice {
         let request_elapsed = request_started.elapsed();
         let estimated_remaining_receive_time =
             estimated_total_receive_time.map(|duration| duration.saturating_sub(request_elapsed));
-        let estimated_receive_completion =
-            estimated_remaining_receive_time.map(|duration| tokio::time::Instant::now() + duration);
         let receive_model = self.streaming_receive_model.clone();
         let receive_measurement = Arc::new(Mutex::new(None));
         let receive_measurement_task = receive_measurement.clone();
@@ -626,18 +624,13 @@ impl Voice for VoicevoxVoice {
                 span: Some(span),
                 request_started_at: Some(request_started_at),
                 estimated_total_receive_time,
-                estimated_remaining_receive_time,
-                estimated_receive_completion,
                 total_audio_playback_duration: estimated_audio_duration,
                 receive_speed_secs_per_audio_second: receive_speed,
                 prediction_bias_secs,
                 receive_segment_stddev_secs,
                 buffer_sigma: Some(self.client.buffer_sigma),
                 receive_measurement,
-                first_audio_latency: None,
                 chunk_audio_duration: Some(std::time::Duration::from_secs_f64(segment_length)),
-                max_chunk_arrival: None,
-                sample_count: 0,
             },
         })
     }

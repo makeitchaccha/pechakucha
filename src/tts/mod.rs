@@ -57,11 +57,31 @@ pub enum AudioOutput {
 /// Voice-specific measured stream timing data for playback policy.
 #[derive(Clone, Debug, Default)]
 pub struct StreamTimingProfile {
-    pub first_audio_latency: Option<std::time::Duration>,
+    /// Carries the synthesis request's tracing context into Session logs.
+    pub span: Option<tracing::Span>,
+    /// Request start used to report elapsed time at playback start.
+    pub request_started_at: Option<tokio::time::Instant>,
+    /// Predicted total time from request start until the complete response.
+    pub estimated_total_receive_time: Option<std::time::Duration>,
+    /// Estimated playback duration for the complete requested utterance.
+    pub total_audio_playback_duration: Option<std::time::Duration>,
+    /// Current RLS slope: receive seconds per second of generated audio.
+    pub receive_speed_secs_per_audio_second: f64,
+    /// Current RLS intercept: systematic total receive-time prediction error.
+    pub prediction_bias_secs: f64,
+    /// Standard deviation of receive intervals between full-size VOICEVOX segments.
+    pub receive_segment_stddev_secs: Option<f64>,
+    /// User-selected number of segment-time standard deviations for buffering.
+    pub buffer_sigma: Option<f64>,
+    /// Shared with the receive task and filled when the full response arrives.
+    pub receive_measurement: std::sync::Arc<std::sync::Mutex<Option<StreamReceiveMeasurement>>>,
     pub chunk_audio_duration: Option<std::time::Duration>,
-    /// Largest observed gap between chunks in the available measurements.
-    pub max_chunk_arrival: Option<std::time::Duration>,
-    pub sample_count: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct StreamReceiveMeasurement {
+    pub active_receive_time: std::time::Duration,
+    pub completed_at: tokio::time::Instant,
 }
 
 impl AudioOutput {

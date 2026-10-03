@@ -1,4 +1,4 @@
-use crate::session::driver::AudioDriver;
+use crate::session::driver::{AudioDriver, PlaybackResult};
 use crate::session::{Announcement, SessionControl, SessionHandle, UserUtterance};
 use crate::tts::Voice;
 use poise::serenity_prelude::UserId;
@@ -57,7 +57,8 @@ impl SessionActor {
 
         const INITIAL_TOKEN: usize = 3;
         let mut tokens: isize = INITIAL_TOKEN as isize;
-        let (playback_done_tx, mut playback_done_rx) = mpsc::channel(INITIAL_TOKEN * 2);
+        let (playback_done_tx, mut playback_done_rx) =
+            mpsc::channel::<PlaybackResult>(INITIAL_TOKEN * 2);
         let mut last_speaker_id: Option<UserId> = None;
 
         loop {
@@ -77,9 +78,13 @@ impl SessionActor {
                         }
                     }
                 }
-                Some(_) = playback_done_rx.recv() => {
-                    tokens += 1;
-                    tracing::debug!("Utterance token released. Current: {}", tokens);
+                Some(result) = playback_done_rx.recv() => {
+                    result.log_track_error();
+                    result.log_prediction_result();
+                    if result.is_utterance_finished() {
+                        tokens += 1;
+                        tracing::debug!("Utterance token released. Current: {}", tokens);
+                    }
                     continue;
                 }
                 Some(announcement) = self.announce_rx.recv() => IncomingUtterance::Announcement(announcement),
@@ -141,7 +146,7 @@ impl SessionActor {
     async fn generate_and_play(
         utterance: Utterance,
         driver: Arc<dyn AudioDriver>,
-        utterance_done: mpsc::Sender<()>,
+        utterance_done: mpsc::Sender<PlaybackResult>,
     ) -> anyhow::Result<()> {
         let mut outputs = Vec::new();
         let mut texts = Vec::new();

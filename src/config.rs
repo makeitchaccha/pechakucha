@@ -43,6 +43,15 @@ impl AppConfig {
             ));
         }
 
+        if let Some(voicevox) = &self.backend.voicevox
+            && (!voicevox.streaming.buffer_sigma.is_finite()
+                || voicevox.streaming.buffer_sigma < 0.0)
+        {
+            return Err(anyhow!(
+                "backend.voicevox.streaming.buffer_sigma must be a finite number greater than or equal to 0.0"
+            ));
+        }
+
         Ok(())
     }
 }
@@ -90,16 +99,28 @@ pub struct VoicevoxBackendConfig {
     pub url: String,
     #[serde(default = "default_voicevox_timeout")]
     pub timeout: u64,
-    #[serde(default = "default_voicevox_streaming_synthesis")]
-    pub streaming_synthesis: bool,
+    #[serde(default)]
+    pub streaming: VoicevoxStreamingConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct VoicevoxStreamingConfig {
+    pub enabled: bool,
+    pub buffer_sigma: f64,
+}
+
+impl Default for VoicevoxStreamingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            buffer_sigma: 2.0,
+        }
+    }
 }
 
 fn default_voicevox_timeout() -> u64 {
     30
-}
-
-fn default_voicevox_streaming_synthesis() -> bool {
-    false
 }
 
 #[derive(Debug, Clone, Deserialize)]

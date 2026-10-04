@@ -1,5 +1,5 @@
 use crate::session::SessionControl;
-use crate::session::startup_buffer::StartupBuffer;
+use crate::session::startup_buffer::{StartupBuffer, StartupBufferOutput};
 use crate::tts::AudioOutput;
 use async_trait::async_trait;
 use futures_util::{StreamExt, stream};
@@ -81,14 +81,36 @@ impl AudioDriver for SongbirdDriver {
         utterance_done: mpsc::Sender<()>,
     ) -> anyhow::Result<()> {
         let mut inputs = Vec::with_capacity(outputs.len());
-        for output in outputs {
+        for (output_index, output) in outputs.into_iter().enumerate() {
             let input = match output {
                 AudioOutput::Buffered(bytes) => bytes.to_vec().into(),
                 AudioOutput::Stream { chunks, timing } => {
                     let audio_format = timing.audio_format;
-                    let span = timing.span.clone();
-                    let buffer_future = StartupBuffer::new(chunks, timing).run();
-                    let (buffered_chunks, chunks) = buffer_future.instrument(span).await;
+                    let buffering_started = tokio::time::Instant::now();
+                    let startup_buffer_span =
+                        tracing::debug_span!("stream_startup_buffer", output_index).or_current();
+                    let StartupBufferOutput {
+                        buffered_chunks,
+                        chunks,
+                        decision,
+                    } = StartupBuffer::new(chunks, timing)
+                        .run()
+                        .instrument(startup_buffer_span.clone())
+                        .await;
+                    let buffered_container_bytes = buffered_chunks
+                        .iter()
+                        .filter_map(|chunk| chunk.as_ref().ok())
+                        .fold(0u64, |total, bytes| {
+                            total.saturating_add(bytes.len() as u64)
+                        });
+                    tracing::debug!(
+                        parent: &startup_buffer_span,
+                        reason = ?decision.reason,
+                        startup_buffering_ms = buffering_started.elapsed().as_millis() as u64,
+                        buffered_container_bytes,
+                        receive_playback_margin_secs = ?decision.receive_playback_margin_secs,
+                        "Stream startup buffer released"
+                    );
                     let stream = stream::iter(buffered_chunks)
                         .chain(stream::unfold(chunks, |mut receiver| async move {
                             receiver.recv().await.map(|chunk| (chunk, receiver))

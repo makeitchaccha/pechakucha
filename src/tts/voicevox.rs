@@ -256,7 +256,17 @@ struct StreamingReceiveModel {
 #[derive(Clone, Copy)]
 struct StreamingReceivePrediction {
     total_receive_time: std::time::Duration,
+    receive_rate_secs_per_audio_sec: f64,
+    request_overhead_secs: f64,
     segment_uncertainty: SegmentReceiveUncertainty,
+}
+
+struct StreamingReceiveModelUpdate {
+    predicted_receive_time_secs: f64,
+    r_before: f64,
+    b_before: f64,
+    r_after: f64,
+    b_after: f64,
 }
 
 #[derive(Clone, Copy)]
@@ -333,6 +343,7 @@ impl StreamingReceiveModel {
         &self,
         audio_duration: std::time::Duration,
     ) -> Result<StreamingReceivePrediction, VoiceError> {
+        let [receive_rate_secs_per_audio_sec, request_overhead_secs] = *self.rls.coefficients();
         let estimated_secs = self
             .rls
             .predict(Self::receive_time_features(audio_duration.as_secs_f64()))
@@ -346,6 +357,8 @@ impl StreamingReceiveModel {
 
         Ok(StreamingReceivePrediction {
             total_receive_time,
+            receive_rate_secs_per_audio_sec,
+            request_overhead_secs,
             segment_uncertainty: self.segment_uncertainty(),
         })
     }
@@ -354,19 +367,32 @@ impl StreamingReceiveModel {
         [audio_duration_secs, 1.0]
     }
 
-    fn observe_completed_request(&mut self, audio_duration_secs: f64, receive_time_secs: f64) {
+    fn observe_completed_request(
+        &mut self,
+        audio_duration_secs: f64,
+        receive_time_secs: f64,
+    ) -> Option<StreamingReceiveModelUpdate> {
         if !audio_duration_secs.is_finite()
             || audio_duration_secs <= 0.0
             || !receive_time_secs.is_finite()
             || receive_time_secs <= 0.0
         {
-            return;
+            return None;
         }
 
-        let _ = self.rls.update(
-            Self::receive_time_features(audio_duration_secs),
-            receive_time_secs,
-        );
+        let features = Self::receive_time_features(audio_duration_secs);
+        let predicted_receive_time_secs = self.rls.predict(features);
+        let [r_before, b_before] = *self.rls.coefficients();
+        self.rls.update(features, receive_time_secs).ok()?;
+        let [r_after, b_after] = *self.rls.coefficients();
+
+        Some(StreamingReceiveModelUpdate {
+            predicted_receive_time_secs,
+            r_before,
+            b_before,
+            r_after,
+            b_after,
+        })
     }
 
     fn segment_uncertainty(&self) -> SegmentReceiveUncertainty {
@@ -461,28 +487,38 @@ impl Voice for VoicevoxVoice {
         // `segment_length` is the configured target duration, in seconds, for
         // each Engine-generated segment.
         let segment_length = self.client.segment_length;
-        tracing::debug!(
+        let span = tracing::info_span!(
+            "voicevox_stream",
             speaker_id = self.config.speaker_id,
-            segment_length_secs = segment_length,
-            "Using configured VOICEVOX streaming segment length"
-        );
+            segment_length_secs = segment_length
+        )
+        .or_current();
 
-        let startup_prediction = audio_query.estimated_audio_duration().and_then(|duration| {
-            self.streaming_receive_model
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .predict(duration)
-                .map(|prediction| (duration, prediction))
+        let startup_prediction = span.in_scope(|| {
+            audio_query
+                .estimated_audio_duration()
+                .and_then(|duration| {
+                    self.streaming_receive_model
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .predict(duration)
+                        .map(|prediction| (duration, prediction))
+                })
+                .map(|(duration, prediction)| {
+                    tracing::debug!(
+                        estimated_audio_secs = duration.as_secs_f64(),
+                        predicted_total_receive_secs = prediction.total_receive_time.as_secs_f64(),
+                        r = prediction.receive_rate_secs_per_audio_sec,
+                        b = prediction.request_overhead_secs,
+                        "VOICEVOX receive-time model prediction"
+                    );
+                    (duration, prediction)
+                })
         });
         let (estimated_audio_duration, prediction) = match startup_prediction {
             Ok(prediction) => prediction,
             Err(_) => return self.buffered_output(audio_query).await,
         };
-        let span = tracing::info_span!(
-            "voicevox_stream",
-            speaker_id = self.config.speaker_id,
-            segment_length_secs = segment_length
-        );
         let request_started = std::time::Instant::now();
         let request_started_at = tokio::time::Instant::now();
 
@@ -530,11 +566,24 @@ impl Voice for VoicevoxVoice {
                         let _ = tx.send(Err(error)).await;
                     } else {
                         let t = measured_receive_time.as_secs_f64();
-                        let mut model = receive_model
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner);
                         let d = estimated_audio_duration.as_secs_f64();
-                        model.observe_completed_request(d, t);
+                        let update = receive_model
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .observe_completed_request(d, t);
+                        if let Some(update) = update {
+                            tracing::debug!(
+                                audio_duration_secs = d,
+                                predicted_total_receive_secs = update.predicted_receive_time_secs,
+                                observed_total_receive_secs = t,
+                                residual_secs = t - update.predicted_receive_time_secs,
+                                r_before = update.r_before,
+                                b_before = update.b_before,
+                                r_after = update.r_after,
+                                b_after = update.b_after,
+                                "VOICEVOX receive-time RLS updated"
+                            );
+                        }
                         tracing::debug!(
                             received_bytes,
                             expected_bytes,
@@ -586,12 +635,11 @@ impl Voice for VoicevoxVoice {
                     }
                 }
             }
-        }.instrument(stream_span));
+        }.instrument(stream_span.or_current()));
 
         Ok(AudioOutput::Stream {
             chunks,
             timing: StreamTimingProfile {
-                span,
                 request_started_at,
                 estimated_total_receive_time: prediction.total_receive_time,
                 total_audio_playback_duration: estimated_audio_duration,

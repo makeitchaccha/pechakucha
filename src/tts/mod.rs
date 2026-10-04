@@ -59,8 +59,6 @@ pub enum AudioOutput {
 /// Audio layout and timing information used by the streaming playback policy.
 #[derive(Debug)]
 pub struct StreamTimingProfile {
-    /// Carries the synthesis request's tracing context into Session logs.
-    pub span: tracing::Span,
     /// Request start used to calculate elapsed time in the startup policy.
     pub request_started_at: tokio::time::Instant,
     /// Predicted total time from request start until the complete response.

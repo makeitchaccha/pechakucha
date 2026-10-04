@@ -4,6 +4,7 @@ use moka::future::Cache;
 use sha2::Digest;
 use sha2::digest::Update;
 use tokio::sync::mpsc;
+use tracing::Instrument;
 
 pub struct CachedVoice {
     identifier: String,
@@ -32,7 +33,6 @@ impl Voice for CachedVoice {
     }
 
     async fn generate(&self, text: &str) -> Result<AudioOutput, VoiceError> {
-        tracing::debug!("cached-voice requested to generate: {}", text);
         let key = hex::encode(
             sha2::Sha256::new()
                 .chain(self.identifier.as_bytes())
@@ -41,15 +41,11 @@ impl Voice for CachedVoice {
         );
 
         if let Some(data) = self.cache.get(&key).await {
-            tracing::debug!("cache hit for {} with key {}", &text, &key);
+            tracing::debug!(audio_bytes = data.len(), "Voice cache hit");
             return Ok(AudioOutput::Buffered(data.into()));
         }
 
-        tracing::debug!(
-            "cache miss for {} with key {}, delegate request",
-            &text,
-            &key
-        );
+        tracing::debug!("Voice cache miss; delegating synthesis");
         match self.inner.generate(text).await? {
             AudioOutput::Buffered(data) => {
                 self.cache.insert(key, data.to_vec()).await;
@@ -58,24 +54,27 @@ impl Voice for CachedVoice {
             AudioOutput::Stream { mut chunks, timing } => {
                 let (tx, rx) = mpsc::channel(8);
                 let cache = self.cache.clone();
-                tokio::spawn(async move {
-                    let mut cached_audio = Vec::new();
-                    while let Some(chunk) = chunks.recv().await {
-                        match chunk {
-                            Ok(bytes) => {
-                                cached_audio.extend_from_slice(&bytes);
-                                if tx.send(Ok(bytes)).await.is_err() {
+                tokio::spawn(
+                    async move {
+                        let mut cached_audio = Vec::new();
+                        while let Some(chunk) = chunks.recv().await {
+                            match chunk {
+                                Ok(bytes) => {
+                                    cached_audio.extend_from_slice(&bytes);
+                                    if tx.send(Ok(bytes)).await.is_err() {
+                                        return;
+                                    }
+                                }
+                                Err(error) => {
+                                    let _ = tx.send(Err(error)).await;
                                     return;
                                 }
                             }
-                            Err(error) => {
-                                let _ = tx.send(Err(error)).await;
-                                return;
-                            }
                         }
+                        cache.insert(key, cached_audio).await;
                     }
-                    cache.insert(key, cached_audio).await;
-                });
+                    .in_current_span(),
+                );
                 Ok(AudioOutput::Stream { chunks: rx, timing })
             }
         }

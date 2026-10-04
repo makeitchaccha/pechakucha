@@ -143,7 +143,7 @@ impl Voice for GoogleCloudVoice {
     }
 
     async fn generate(&self, text: &str) -> Result<AudioOutput, VoiceError> {
-        tracing::debug!("google cloud voice requested to generate: {}", text);
+        tracing::debug!("Requesting Google Cloud speech synthesis");
         let response = match self
             .client
             .synthesize_speech()

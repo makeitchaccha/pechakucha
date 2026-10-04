@@ -1,11 +1,11 @@
-use crate::session::driver::{AudioDriver, PlaybackResult};
+use crate::session::driver::AudioDriver;
 use crate::session::{Announcement, SessionControl, SessionHandle, UserUtterance};
 use crate::tts::Voice;
 use poise::serenity_prelude::UserId;
 use std::sync::Arc;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc};
-use tracing;
+use tracing::Instrument;
 
 struct Utterance {
     text: String,
@@ -57,8 +57,7 @@ impl SessionActor {
 
         const INITIAL_TOKEN: usize = 3;
         let mut tokens: isize = INITIAL_TOKEN as isize;
-        let (playback_done_tx, mut playback_done_rx) =
-            mpsc::channel::<PlaybackResult>(INITIAL_TOKEN * 2);
+        let (playback_done_tx, mut playback_done_rx) = mpsc::channel::<()>(INITIAL_TOKEN * 2);
         let mut last_speaker_id: Option<UserId> = None;
 
         loop {
@@ -78,13 +77,9 @@ impl SessionActor {
                         }
                     }
                 }
-                Some(result) = playback_done_rx.recv() => {
-                    result.log_track_error();
-                    result.log_prediction_result();
-                    if result.is_utterance_finished() {
-                        tokens += 1;
-                        tracing::debug!("Utterance token released. Current: {}", tokens);
-                    }
+                Some(()) = playback_done_rx.recv() => {
+                    tokens += 1;
+                    tracing::debug!(tokens_remaining = tokens, "Utterance token released");
                     continue;
                 }
                 Some(announcement) = self.announce_rx.recv() => IncomingUtterance::Announcement(announcement),
@@ -92,7 +87,7 @@ impl SessionActor {
                     match result {
                         Ok(utterance) => IncomingUtterance::User(utterance),
                         Err(broadcast::error::RecvError::Lagged(count)) => {
-                            tracing::warn!("session actor lagged, skip {} user utterances", count);
+                            tracing::warn!(skipped_utterances = count, "Session actor lagged");
                             continue;
                         }
                         Err(broadcast::error::RecvError::Closed) => break,
@@ -126,12 +121,11 @@ impl SessionActor {
                 voice,
             };
 
-            if let Err(err) =
-                Self::generate_and_play(utterance, self.driver.clone(), playback_done_tx.clone())
-                    .await
+            if Self::generate_and_play(utterance, self.driver.clone(), playback_done_tx.clone())
+                .await
+                .is_err()
             {
                 tokens += 1;
-                tracing::warn!("Couldn't generate playback: {:?}", err);
             }
         }
 
@@ -146,23 +140,43 @@ impl SessionActor {
     async fn generate_and_play(
         utterance: Utterance,
         driver: Arc<dyn AudioDriver>,
-        utterance_done: mpsc::Sender<PlaybackResult>,
+        utterance_done: mpsc::Sender<()>,
     ) -> anyhow::Result<()> {
-        let mut outputs = Vec::new();
-        let mut texts = Vec::new();
-        if let Some(announcement) = utterance.speaker_announcement {
-            texts.push(announcement);
-        }
-        texts.push(utterance.text);
+        let text_characters = utterance.text.chars().count()
+            + utterance
+                .speaker_announcement
+                .as_ref()
+                .map_or(0, |announcement| announcement.chars().count());
+        let span = tracing::info_span!(
+            "synthesize_utterance",
+            voice_language = utterance.voice.language(),
+            text_characters
+        );
 
-        for text in texts {
-            let audio_data = match utterance.voice.generate(&text).await {
-                Ok(data) => data,
-                Err(e) => return Err(anyhow::anyhow!(e).context("Failed to generate voice")),
-            };
-            outputs.push(audio_data);
-        }
+        let span = span.or_current();
+        let result = async move {
+            let mut outputs = Vec::new();
+            let mut texts = Vec::new();
+            if let Some(announcement) = utterance.speaker_announcement {
+                texts.push(announcement);
+            }
+            texts.push(utterance.text);
 
-        driver.enqueue_outputs(outputs, utterance_done).await
+            for text in texts {
+                let audio_data = match utterance.voice.generate(&text).await {
+                    Ok(data) => data,
+                    Err(e) => return Err(anyhow::anyhow!(e).context("Failed to generate voice")),
+                };
+                outputs.push(audio_data);
+            }
+
+            driver.enqueue_outputs(outputs, utterance_done).await
+        }
+        .instrument(span.clone())
+        .await;
+        if let Err(error) = &result {
+            span.in_scope(|| tracing::warn!(?error, "Couldn't generate playback"));
+        }
+        result
     }
 }

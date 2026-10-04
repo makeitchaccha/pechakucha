@@ -1,4 +1,4 @@
-use crate::tts::{AudioOutput, DISCORD_SAMPLE_RATE, Voice, VoiceDetail, VoiceError};
+use crate::tts::{AudioOutput, DISCORD_SAMPLE_RATE_HZ, Voice, VoiceDetail, VoiceError};
 use async_trait::async_trait;
 use google_cloud_texttospeech_v1::client::TextToSpeech;
 use google_cloud_texttospeech_v1::model::{
@@ -88,7 +88,7 @@ impl From<GoogleCloudVoiceConfig> for (VoiceSelectionParams, AudioConfig) {
             .set_speaking_rate(c.speaking_rate.unwrap_or_default())
             .set_pitch(c.pitch.unwrap_or_default())
             .set_volume_gain_db(c.volume_gain_db.unwrap_or_default())
-            .set_sample_rate_hertz(DISCORD_SAMPLE_RATE);
+            .set_sample_rate_hertz(DISCORD_SAMPLE_RATE_HZ);
 
         (params, audio)
     }
@@ -143,7 +143,7 @@ impl Voice for GoogleCloudVoice {
     }
 
     async fn generate(&self, text: &str) -> Result<AudioOutput, VoiceError> {
-        tracing::debug!("google cloud voice requested to generate: {}", text);
+        tracing::debug!("Requesting Google Cloud speech synthesis");
         let response = match self
             .client
             .synthesize_speech()

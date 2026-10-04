@@ -5,6 +5,7 @@ use anyhow::Context;
 use poise::serenity_prelude as serenity;
 use poise::serenity_prelude::{ChannelId, GuildId};
 use std::sync::Arc;
+use tracing::Instrument;
 
 pub async fn start(
     ctx: &serenity::Context,
@@ -27,7 +28,17 @@ pub async fn start(
     let driver = SongbirdDriver { call: handler };
     let (actor, handle) = SessionActor::new(Arc::new(driver));
 
-    tokio::spawn(actor.run());
+    tokio::spawn(
+        actor.run().instrument(
+            tracing::info_span!(
+                "session",
+                guild_id = %guild_id,
+                text_channel_id = %text_channel_id,
+                voice_channel_id = %voice_channel_id
+            )
+            .or_current(),
+        ),
+    );
 
     data.session_manager
         .register(guild_id, text_channel_id, voice_channel_id, handle.clone());

@@ -3,6 +3,7 @@ pub mod command;
 pub mod config;
 pub mod handler;
 pub mod localization;
+pub mod math;
 pub mod profile;
 pub mod session;
 mod text_preprocessor;

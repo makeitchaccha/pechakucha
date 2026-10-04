@@ -6,7 +6,7 @@ use tokio::sync::{broadcast, mpsc};
 pub mod actor;
 pub mod driver;
 pub mod manager;
-mod startup_buffer;
+mod streaming;
 
 #[derive(Debug, Clone)]
 pub struct Speaker {

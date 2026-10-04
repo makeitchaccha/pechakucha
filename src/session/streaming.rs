@@ -7,34 +7,34 @@ const MAX_STARTUP_BUFFERING: Duration = Duration::from_secs(60);
 /// Recheck the time-based decision while waiting for the next chunk.
 const DECISION_RECHECK_INTERVAL: Duration = Duration::from_millis(50);
 
-pub(super) struct StartupBuffer {
+pub(super) struct PlaybackStartGate {
     chunks: mpsc::Receiver<Result<bytes::Bytes, VoiceError>>,
     timing: StreamTimingProfile,
-    buffered_chunks: Vec<Result<bytes::Bytes, VoiceError>>,
+    pending_chunks: Vec<Result<bytes::Bytes, VoiceError>>,
     received_bytes: u64,
     started: tokio::time::Instant,
 }
 
-pub(super) struct StartupBufferOutput {
-    pub(super) buffered_chunks: Vec<Result<bytes::Bytes, VoiceError>>,
+pub(super) struct PlaybackStartGateOutput {
+    pub(super) pending_chunks: Vec<Result<bytes::Bytes, VoiceError>>,
     pub(super) chunks: mpsc::Receiver<Result<bytes::Bytes, VoiceError>>,
-    pub(super) decision: StartupBufferDecision,
+    pub(super) decision: PlaybackStartGateDecision,
 }
 
-pub(super) struct StartupBufferDecision {
-    pub(super) reason: StartupBufferReleaseReason,
+pub(super) struct PlaybackStartGateDecision {
+    pub(super) reason: PlaybackStartGateReleaseReason,
     pub(super) receive_playback_margin_secs: Option<f64>,
 }
 
 #[derive(Debug)]
-pub(super) enum StartupBufferReleaseReason {
+pub(super) enum PlaybackStartGateReleaseReason {
     PredictionReady,
     MaxBufferingTime,
     StreamEnded,
     StreamError,
 }
 
-impl StartupBuffer {
+impl PlaybackStartGate {
     pub(super) fn new(
         chunks: mpsc::Receiver<Result<bytes::Bytes, VoiceError>>,
         timing: StreamTimingProfile,
@@ -42,13 +42,13 @@ impl StartupBuffer {
         Self {
             chunks,
             timing,
-            buffered_chunks: Vec::new(),
+            pending_chunks: Vec::new(),
             received_bytes: 0,
             started: tokio::time::Instant::now(),
         }
     }
 
-    pub(super) async fn run(mut self) -> StartupBufferOutput {
+    pub(super) async fn run(mut self) -> PlaybackStartGateOutput {
         let max_deadline = self.started + MAX_STARTUP_BUFFERING;
         let reason;
         let mut receive_playback_margin_secs = None;
@@ -58,12 +58,12 @@ impl StartupBuffer {
                 let margin = playable - predicted;
                 receive_playback_margin_secs = Some(margin);
                 if margin > 0.0 {
-                    reason = StartupBufferReleaseReason::PredictionReady;
+                    reason = PlaybackStartGateReleaseReason::PredictionReady;
                     break;
                 }
             }
             if now >= max_deadline {
-                reason = StartupBufferReleaseReason::MaxBufferingTime;
+                reason = PlaybackStartGateReleaseReason::MaxBufferingTime;
                 break;
             }
             let poll_deadline = (now + DECISION_RECHECK_INTERVAL).min(max_deadline);
@@ -75,26 +75,26 @@ impl StartupBuffer {
                             self.received_bytes = self.received_bytes.saturating_add(bytes.len() as u64);
                         }
                         let is_error = chunk.is_err();
-                        self.buffered_chunks.push(chunk);
+                        self.pending_chunks.push(chunk);
                         if is_error {
-                            reason = StartupBufferReleaseReason::StreamError;
+                            reason = PlaybackStartGateReleaseReason::StreamError;
                             break;
                         }
                     },
                     None => {
-                        reason = StartupBufferReleaseReason::StreamEnded;
+                        reason = PlaybackStartGateReleaseReason::StreamEnded;
                         break;
                     },
                 },
                 _ = tokio::time::sleep_until(poll_deadline) => {},
             }
         }
-        StartupBufferOutput {
-            decision: StartupBufferDecision {
+        PlaybackStartGateOutput {
+            decision: PlaybackStartGateDecision {
                 reason,
                 receive_playback_margin_secs,
             },
-            buffered_chunks: self.buffered_chunks,
+            pending_chunks: self.pending_chunks,
             chunks: self.chunks,
         }
     }
@@ -105,8 +105,8 @@ impl StartupBuffer {
         }
         Some((
             self.timing
-                .predicted_remaining_receive_time(now, self.received_bytes),
-            self.timing.playback_time_after_start().as_secs_f64(),
+                .predicted_receive_completion_delay(now, self.received_bytes),
+            self.timing.safe_playback_window().as_secs_f64(),
         ))
     }
 }

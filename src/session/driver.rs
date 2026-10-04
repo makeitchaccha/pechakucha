@@ -1,5 +1,5 @@
 use crate::session::SessionControl;
-use crate::session::startup_buffer::{StartupBuffer, StartupBufferOutput};
+use crate::session::streaming::{PlaybackStartGate, PlaybackStartGateOutput};
 use crate::tts::AudioOutput;
 use async_trait::async_trait;
 use futures_util::{StreamExt, stream};
@@ -89,15 +89,15 @@ impl AudioDriver for SongbirdDriver {
                     let buffering_started = tokio::time::Instant::now();
                     let startup_buffer_span =
                         tracing::debug_span!("stream_startup_buffer", output_index).or_current();
-                    let StartupBufferOutput {
-                        buffered_chunks,
+                    let PlaybackStartGateOutput {
+                        pending_chunks,
                         chunks,
                         decision,
-                    } = StartupBuffer::new(chunks, timing)
+                    } = PlaybackStartGate::new(chunks, timing)
                         .run()
                         .instrument(startup_buffer_span.clone())
                         .await;
-                    let buffered_container_bytes = buffered_chunks
+                    let buffered_container_bytes = pending_chunks
                         .iter()
                         .filter_map(|chunk| chunk.as_ref().ok())
                         .fold(0u64, |total, bytes| {
@@ -111,7 +111,7 @@ impl AudioDriver for SongbirdDriver {
                         receive_playback_margin_secs = ?decision.receive_playback_margin_secs,
                         "Stream startup buffer released"
                     );
-                    let stream = stream::iter(buffered_chunks)
+                    let stream = stream::iter(pending_chunks)
                         .chain(stream::unfold(chunks, |mut receiver| async move {
                             receiver.recv().await.map(|chunk| (chunk, receiver))
                         }))

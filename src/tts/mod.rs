@@ -74,9 +74,9 @@ pub struct StreamTimingProfile {
 }
 
 impl StreamTimingProfile {
-    /// Returns the prediction's conservative remaining receive time for the
-    /// stream progress observed so far.
-    pub(crate) fn predicted_remaining_receive_time(
+    /// Returns the predicted delay until receive completion, including the
+    /// conservative margin for the stream progress observed so far.
+    pub(crate) fn predicted_receive_completion_delay(
         &self,
         now: tokio::time::Instant,
         received_container_bytes: u64,
@@ -119,7 +119,8 @@ impl StreamTimingProfile {
             .audio_seconds_for_payload_bytes(received_pcm_bytes)
     }
 
-    pub(crate) fn playback_time_after_start(&self) -> std::time::Duration {
+    /// Returns the playback duration available after reserving one chunk for startup.
+    pub(crate) fn safe_playback_window(&self) -> std::time::Duration {
         self.total_audio_playback_duration
             .saturating_sub(self.chunk_audio_duration)
     }

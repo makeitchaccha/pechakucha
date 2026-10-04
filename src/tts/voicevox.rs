@@ -5,8 +5,17 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tracing::Instrument;
 
+use crate::math::recursive_least_squares::RecursiveLeastSquares;
 use crate::tts::{
-    AudioOutput, SegmentReceiveUncertainty, StreamTimingProfile, Voice, VoiceDetail, VoiceError,
+    AudioOutput, SegmentReceiveUncertainty, StreamAudioFormat, StreamTimingProfile, Voice,
+    VoiceDetail, VoiceError,
+};
+
+const STREAM_CHUNK_QUEUE_CAPACITY: usize = 8;
+// Current VOICEVOX stream layout used by startup buffering and receive prediction.
+const VOICEVOX_STREAM_AUDIO_FORMAT: StreamAudioFormat = StreamAudioFormat {
+    container_header_bytes: 44,
+    pcm_payload_bytes_per_second: 48_000,
 };
 
 #[derive(Serialize, Deserialize)]
@@ -240,7 +249,7 @@ pub struct VoicevoxVoice {
 /// RLS estimates for request receive time and EMA uncertainty for
 /// segment-to-segment receive-time variation.
 struct StreamingReceiveModel {
-    rls: Rls,
+    rls: RecursiveLeastSquares<2>,
     segment_uncertainty: SegmentUncertaintyModel,
 }
 
@@ -297,73 +306,22 @@ impl SegmentUncertaintyModel {
     }
 }
 
-struct Rls {
-    // theta = [R, B]
-    r: f64,
-    b: f64,
-    // covariance matrix P
-    p: [[f64; 2]; 2],
-    // forgetting factor
-    lambda: f64,
-}
-
-impl Rls {
-    const INITIAL_COVARIANCE: f64 = 100.0;
-    const FORGETTING_FACTOR: f64 = 0.9;
-
-    fn new(r: f64, b: f64) -> Self {
-        let initial_covariance = Self::INITIAL_COVARIANCE;
-        Self {
-            r,
-            b,
-            p: [[initial_covariance, 0.0], [0.0, initial_covariance]],
-            lambda: Self::FORGETTING_FACTOR,
-        }
-    }
-
-    // T_hat = D * R + B
-    fn predict(&self, d: f64) -> f64 {
-        self.r * d + self.b
-    }
-
-    // Update [R, B] from one observed pair (D, T).
-    fn observe(&mut self, d: f64, t: f64) {
-        if !d.is_finite() || d <= 0.0 || !t.is_finite() || t <= 0.0 {
-            return;
-        }
-
-        let x0 = d;
-        let x1 = 1.0;
-        let t_hat = self.predict(d);
-        let error = t - t_hat;
-
-        let px0 = self.p[0][0] * x0 + self.p[0][1] * x1;
-        let px1 = self.p[1][0] * x0 + self.p[1][1] * x1;
-        let denominator = self.lambda + x0 * px0 + x1 * px1;
-        if !denominator.is_finite() || denominator <= 0.0 {
-            return;
-        }
-
-        let k0 = px0 / denominator;
-        let k1 = px1 / denominator;
-        let old_p = self.p;
-
-        self.r += k0 * error;
-        self.b += k1 * error;
-        self.p[0][0] = (old_p[0][0] - k0 * (x0 * old_p[0][0] + x1 * old_p[1][0])) / self.lambda;
-        self.p[0][1] = (old_p[0][1] - k0 * (x0 * old_p[0][1] + x1 * old_p[1][1])) / self.lambda;
-        self.p[1][0] = (old_p[1][0] - k1 * (x0 * old_p[0][0] + x1 * old_p[1][0])) / self.lambda;
-        self.p[1][1] = (old_p[1][1] - k1 * (x0 * old_p[0][1] + x1 * old_p[1][1])) / self.lambda;
-    }
-}
-
 impl StreamingReceiveModel {
+    const INITIAL_COEFFICIENTS: [f64; 2] = [1.0, 0.0];
+    const INITIAL_COVARIANCE: [[f64; 2]; 2] = [[100.0, 0.0], [0.0, 100.0]];
+    const FORGETTING_FACTOR: f64 = 0.9;
+    /// Ignore short chunks when measuring the receive interval of full segments.
+    const MIN_SEGMENT_CHUNK_COMPLETENESS: f64 = 0.9;
     const UNCERTAINTY_ALPHA: f64 = 0.05;
     const MIN_UNCERTAINTY_SAMPLES: u64 = 5;
 
     fn new() -> Self {
         Self {
-            rls: Rls::new(1.0, 0.0),
+            rls: RecursiveLeastSquares::new(
+                Self::INITIAL_COEFFICIENTS,
+                Self::INITIAL_COVARIANCE,
+                Self::FORGETTING_FACTOR,
+            ),
             segment_uncertainty: SegmentUncertaintyModel::Warmup {
                 error_variance_secs2: 0.0,
                 samples_seen: 0,
@@ -375,7 +333,10 @@ impl StreamingReceiveModel {
         &self,
         audio_duration: std::time::Duration,
     ) -> Result<StreamingReceivePrediction, VoiceError> {
-        let estimated_secs = self.rls.predict(audio_duration.as_secs_f64()).max(0.0);
+        let estimated_secs = self
+            .rls
+            .predict(Self::receive_time_features(audio_duration.as_secs_f64()))
+            .max(0.0);
         let total_receive_time =
             std::time::Duration::try_from_secs_f64(estimated_secs).map_err(|error| {
                 VoiceError::Api(anyhow::anyhow!(
@@ -387,6 +348,25 @@ impl StreamingReceiveModel {
             total_receive_time,
             segment_uncertainty: self.segment_uncertainty(),
         })
+    }
+
+    fn receive_time_features(audio_duration_secs: f64) -> [f64; 2] {
+        [audio_duration_secs, 1.0]
+    }
+
+    fn observe_completed_request(&mut self, audio_duration_secs: f64, receive_time_secs: f64) {
+        if !audio_duration_secs.is_finite()
+            || audio_duration_secs <= 0.0
+            || !receive_time_secs.is_finite()
+            || receive_time_secs <= 0.0
+        {
+            return;
+        }
+
+        let _ = self.rls.update(
+            Self::receive_time_features(audio_duration_secs),
+            receive_time_secs,
+        );
     }
 
     fn segment_uncertainty(&self) -> SegmentReceiveUncertainty {
@@ -409,7 +389,7 @@ impl StreamingReceiveModel {
             return;
         }
 
-        let expected_interval = self.rls.r * audio_segment_secs;
+        let expected_interval = self.rls.coefficients()[0] * audio_segment_secs;
         let segment_error = interval_secs - expected_interval;
         self.segment_uncertainty.observe(
             segment_error * segment_error,
@@ -433,6 +413,18 @@ impl VoicevoxVoice {
             // Keep a separate receive-time model per configured voice.
             streaming_receive_model: Arc::new(Mutex::new(StreamingReceiveModel::new())),
         }
+    }
+
+    async fn buffered_output(
+        &self,
+        audio_query: LazyAudioQuery,
+    ) -> Result<AudioOutput, VoiceError> {
+        let bytes = self
+            .client
+            .synthesis(self.config.speaker_id, audio_query)
+            .await
+            .map_err(VoiceError::Api)?;
+        Ok(AudioOutput::Buffered(bytes.into()))
     }
 
     fn build_identifier(config: &VoicevoxVoiceConfig) -> String {
@@ -463,12 +455,7 @@ impl Voice for VoicevoxVoice {
         audio_query.apply_config(&self.config);
 
         if !self.client.streaming_synthesis {
-            let bytes = self
-                .client
-                .synthesis(self.config.speaker_id, audio_query)
-                .await
-                .map_err(VoiceError::Api)?;
-            return Ok(AudioOutput::Buffered(bytes.into()));
+            return self.buffered_output(audio_query).await;
         }
 
         // `segment_length` is the configured target duration, in seconds, for
@@ -480,12 +467,17 @@ impl Voice for VoicevoxVoice {
             "Using configured VOICEVOX streaming segment length"
         );
 
-        let estimated_audio_duration = audio_query.estimated_audio_duration()?;
-        let prediction = self
-            .streaming_receive_model
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .predict(estimated_audio_duration)?;
+        let startup_prediction = audio_query.estimated_audio_duration().and_then(|duration| {
+            self.streaming_receive_model
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .predict(duration)
+                .map(|prediction| (duration, prediction))
+        });
+        let (estimated_audio_duration, prediction) = match startup_prediction {
+            Ok(prediction) => prediction,
+            Err(_) => return self.buffered_output(audio_query).await,
+        };
         let span = tracing::info_span!(
             "voicevox_stream",
             speaker_id = self.config.speaker_id,
@@ -501,7 +493,7 @@ impl Voice for VoicevoxVoice {
             .await
             .map_err(VoiceError::Api)?;
 
-        let (tx, chunks) = mpsc::channel(8);
+        let (tx, chunks) = mpsc::channel(STREAM_CHUNK_QUEUE_CAPACITY);
         let idle_timeout = self.client.request_timeout;
         let expected_bytes = response.content_length();
         let request_elapsed = request_started.elapsed();
@@ -542,7 +534,7 @@ impl Voice for VoicevoxVoice {
                             .lock()
                             .unwrap_or_else(std::sync::PoisonError::into_inner);
                         let d = estimated_audio_duration.as_secs_f64();
-                        model.rls.observe(d, t);
+                        model.observe_completed_request(d, t);
                         tracing::debug!(
                             received_bytes,
                             expected_bytes,
@@ -554,20 +546,25 @@ impl Voice for VoicevoxVoice {
                 match result {
                     Ok(bytes) => {
                         if !bytes.is_empty() {
-                            let header_bytes = 44u64.saturating_sub(received_bytes.min(44));
-                            let pcm_chunk_bytes = (bytes.len() as u64).saturating_sub(header_bytes);
+                            let pcm_chunk_bytes = VOICEVOX_STREAM_AUDIO_FORMAT
+                                .payload_bytes_in_chunk(received_bytes, bytes.len() as u64);
                             if saw_pcm_chunk {
                                 // Later full-size body chunks represent the
                                 // fixed-length synthesized segments. Exclude
                                 // the first interval, which includes startup.
-                                let full_segment_bytes = 48_000.0 * segment_length;
-                                if pcm_chunk_bytes as f64 >= full_segment_bytes * 0.9 {
+                                let full_segment_bytes = VOICEVOX_STREAM_AUDIO_FORMAT
+                                    .payload_bytes_for_audio_seconds(segment_length);
+                                if pcm_chunk_bytes as f64
+                                    >= full_segment_bytes
+                                        * StreamingReceiveModel::MIN_SEGMENT_CHUNK_COMPLETENESS
+                                {
                                     let mut model = receive_model
                                         .lock()
                                         .unwrap_or_else(std::sync::PoisonError::into_inner);
                                     model.observe_segment_interval(
                                         receive_wait.as_secs_f64(),
-                                        pcm_chunk_bytes as f64 / 48_000.0,
+                                        VOICEVOX_STREAM_AUDIO_FORMAT
+                                            .audio_seconds_for_payload_bytes(pcm_chunk_bytes),
                                     );
                                 }
                             }
@@ -598,6 +595,7 @@ impl Voice for VoicevoxVoice {
                 request_started_at,
                 estimated_total_receive_time: prediction.total_receive_time,
                 total_audio_playback_duration: estimated_audio_duration,
+                audio_format: VOICEVOX_STREAM_AUDIO_FORMAT,
                 receive_uncertainty: prediction.segment_uncertainty,
                 buffer_sigma: self.client.buffer_sigma,
                 chunk_audio_duration: std::time::Duration::from_secs_f64(segment_length),

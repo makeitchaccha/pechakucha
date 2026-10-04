@@ -6,12 +6,12 @@ use futures_util::{StreamExt, stream};
 use songbird::input::{AsyncAdapterStream, AsyncReadOnlySource, AudioStream, Input, LiveInput};
 use songbird::{Call, CoreEvent, Event, EventContext, EventHandler, TrackEvent};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{Mutex, mpsc};
 use tokio_util::io::StreamReader;
 use tracing::Instrument;
 
-const VOICEVOX_PCM_BYTES_PER_SECOND: usize = 48_000;
-const VOICEVOX_RING_BUFFER_SECS: usize = 20;
+const STREAM_AUDIO_RING_BUFFER_DURATION: Duration = Duration::from_secs(20);
 
 #[async_trait]
 pub trait AudioDriver: Sync + Send {
@@ -85,6 +85,7 @@ impl AudioDriver for SongbirdDriver {
             let input = match output {
                 AudioOutput::Buffered(bytes) => bytes.to_vec().into(),
                 AudioOutput::Stream { chunks, timing } => {
+                    let audio_format = timing.audio_format;
                     let span = timing.span.clone();
                     let buffer_future = StartupBuffer::new(chunks, timing).run();
                     let (buffered_chunks, chunks) = buffer_future.instrument(span).await;
@@ -95,7 +96,8 @@ impl AudioDriver for SongbirdDriver {
                         .map(|result| result.map_err(std::io::Error::other));
                     let reader = StreamReader::new(Box::pin(stream));
                     let source = AsyncReadOnlySource::new(reader);
-                    let ring_buffer = VOICEVOX_PCM_BYTES_PER_SECOND * VOICEVOX_RING_BUFFER_SECS;
+                    let ring_buffer = audio_format.pcm_payload_bytes_per_second as usize
+                        * STREAM_AUDIO_RING_BUFFER_DURATION.as_secs() as usize;
                     Input::Live(
                         LiveInput::Raw(AudioStream {
                             input: Box::new(AsyncAdapterStream::new(Box::new(source), ring_buffer)),

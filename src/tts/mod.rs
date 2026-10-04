@@ -9,7 +9,9 @@ use tokio::sync::mpsc;
 
 use thiserror::Error;
 
-const DISCORD_SAMPLE_RATE: i32 = 48_000;
+const DISCORD_SAMPLE_RATE_HZ: i32 = 48_000;
+/// Conservative receive-time margin before segment variability is estimated.
+const WARMUP_RECEIVE_MARGIN: std::time::Duration = std::time::Duration::from_secs(3);
 
 #[derive(Debug, Error)]
 pub enum VoiceError {
@@ -54,7 +56,7 @@ pub enum AudioOutput {
     },
 }
 
-/// Voice-specific measured stream timing data for playback policy.
+/// Audio layout and timing information used by the streaming playback policy.
 #[derive(Debug)]
 pub struct StreamTimingProfile {
     /// Carries the synthesis request's tracing context into Session logs.
@@ -65,11 +67,97 @@ pub struct StreamTimingProfile {
     pub estimated_total_receive_time: std::time::Duration,
     /// Estimated playback duration for the complete requested utterance.
     pub total_audio_playback_duration: std::time::Duration,
+    pub audio_format: StreamAudioFormat,
     /// Whether segment receive-time variability has enough samples for an estimate.
     pub receive_uncertainty: SegmentReceiveUncertainty,
     /// User-selected number of segment-time standard deviations for buffering.
     pub buffer_sigma: f64,
     pub chunk_audio_duration: std::time::Duration,
+}
+
+impl StreamTimingProfile {
+    /// Returns the prediction's conservative remaining receive time for the
+    /// stream progress observed so far.
+    pub(crate) fn predicted_remaining_receive_time(
+        &self,
+        now: tokio::time::Instant,
+        received_container_bytes: u64,
+    ) -> f64 {
+        let elapsed = now.saturating_duration_since(self.request_started_at);
+        let remaining_receive_secs = self
+            .estimated_total_receive_time
+            .saturating_sub(elapsed)
+            .as_secs_f64();
+        let received_audio_secs = self.received_audio_duration_secs(received_container_bytes);
+        let remaining_audio_secs =
+            (self.total_audio_playback_duration.as_secs_f64() - received_audio_secs).max(0.0);
+        let segment_secs = self.chunk_audio_duration.as_secs_f64();
+        let remaining_segments = if segment_secs <= 0.0 {
+            0.0
+        } else {
+            (remaining_audio_secs / segment_secs).ceil()
+        };
+        let receive_margin_secs = match self.receive_uncertainty {
+            SegmentReceiveUncertainty::Warmup => WARMUP_RECEIVE_MARGIN.as_secs_f64(),
+            SegmentReceiveUncertainty::Estimated {
+                standard_deviation_secs,
+            } => self.buffer_sigma * standard_deviation_secs * remaining_segments.sqrt(),
+        };
+
+        remaining_receive_secs + receive_margin_secs
+    }
+
+    pub(crate) fn has_received_audio_payload(&self, received_container_bytes: u64) -> bool {
+        self.audio_format
+            .payload_bytes_received(received_container_bytes)
+            > 0
+    }
+
+    fn received_audio_duration_secs(&self, received_container_bytes: u64) -> f64 {
+        let received_pcm_bytes = self
+            .audio_format
+            .payload_bytes_received(received_container_bytes);
+        self.audio_format
+            .audio_seconds_for_payload_bytes(received_pcm_bytes)
+    }
+
+    pub(crate) fn playback_time_after_start(&self) -> std::time::Duration {
+        self.total_audio_playback_duration
+            .saturating_sub(self.chunk_audio_duration)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct StreamAudioFormat {
+    /// Container bytes that precede the PCM payload.
+    pub container_header_bytes: u64,
+    /// PCM payload bytes corresponding to one second of audio.
+    pub pcm_payload_bytes_per_second: u64,
+}
+
+impl StreamAudioFormat {
+    pub(crate) fn payload_bytes_received(self, container_bytes_received: u64) -> u64 {
+        container_bytes_received.saturating_sub(self.container_header_bytes)
+    }
+
+    pub(crate) fn payload_bytes_in_chunk(
+        self,
+        container_bytes_received: u64,
+        chunk_bytes: u64,
+    ) -> u64 {
+        let remaining_header_bytes = self
+            .container_header_bytes
+            .saturating_sub(container_bytes_received);
+        chunk_bytes.saturating_sub(remaining_header_bytes)
+    }
+
+    pub(crate) fn audio_seconds_for_payload_bytes(self, payload_bytes: u64) -> f64 {
+        payload_bytes as f64 / self.pcm_payload_bytes_per_second as f64
+    }
+
+    pub(crate) fn payload_bytes_for_audio_seconds(self, audio_seconds: f64) -> f64 {
+        audio_seconds * self.pcm_payload_bytes_per_second as f64
+    }
 }
 
 #[derive(Clone, Copy, Debug)]

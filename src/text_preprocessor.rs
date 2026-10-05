@@ -69,10 +69,40 @@ pub fn normalize_code_blocks(content: &str) -> String {
         .to_string()
 }
 
+fn normalize_line_breaks(content: &str) -> String {
+    let mut normalized = String::with_capacity(content.len());
+    let mut chars = content.chars().peekable();
+
+    while let Some(character) = chars.next() {
+        if character == '\n' || character == '\r' {
+            if character == '\r' && chars.peek() == Some(&'\n') {
+                chars.next();
+            }
+
+            let trimmed_len = normalized.trim_end().len();
+            normalized.truncate(trimmed_len);
+            let already_terminated = normalized.chars().last().is_some_and(|last| {
+                matches!(
+                    last,
+                    '。' | '！' | '？' | '.' | '!' | '?' | '、' | '，' | ',' | '；' | ';' | '…'
+                )
+            });
+            if !normalized.is_empty() && !already_terminated {
+                normalized.push('.');
+            }
+        } else {
+            normalized.push(character);
+        }
+    }
+
+    normalized
+}
+
 pub fn preprocess(content: &str, limit: usize) -> String {
     let content = normalize_code_blocks(content);
     let content = normalize_urls(&content);
     let content = normalize_emojis(&content);
+    let content = normalize_line_breaks(&content);
 
     content.chars().take(limit).collect()
 }

@@ -1,0 +1,37 @@
+name: Nix Build
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - nix_system: x86_64-linux
+            runner: ubuntu-latest
+          - nix_system: aarch64-linux
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Docker image
+        id: nix-build
+        run: |
+          image_path="$(nix build ".#packages.${{ matrix.nix_system }}.dockerImage" --no-link --print-out-paths)"
+          echo "image_path=$image_path" >> "$GITHUB_OUTPUT"
+
+      - name: Validate Docker image archive
+        run: docker load --input "${{ steps.nix-build.outputs.image_path }}"

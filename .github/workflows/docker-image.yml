@@ -1,8 +1,4 @@
-name: Docker Image Build & Publish
-
-permissions:
-  contents: read
-  packages: write
+name: Nix Docker Image Build & Publish
 
 on:
   push:
@@ -11,29 +7,47 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: read
+
 env:
   REGISTRY_IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
   build:
     runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
         include:
           - arch: amd64
-            platform: linux/amd64
+            nix_system: x86_64-linux
             runner: ubuntu-latest
-            cache_scope: amd64-builder
           - arch: arm64
-            platform: linux/arm64/v8
+            nix_system: aarch64-linux
             runner: ubuntu-24.04-arm
-            cache_scope: arm64-builder
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Nix Docker image
+        id: nix-build
+        run: |
+          image_path="$(nix build ".#packages.${{ matrix.nix_system }}.dockerImage" --no-link --print-out-paths)"
+          echo "image_path=$image_path" >> "$GITHUB_OUTPUT"
+
+      - name: Load Docker image
+        run: docker load --input "${{ steps.nix-build.outputs.image_path }}"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -44,40 +58,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY_IMAGE }}
-
-      - name: Build and Push ${{ matrix.arch }} Image
-        id: build
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: ${{ matrix.platform }}
-          cache-from: type=gha,scope=${{ matrix.cache_scope }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.cache_scope }}
-          labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
-
-      - name: Export digest
+      - name: Push architecture image
+        env:
+          ARCH: ${{ matrix.arch }}
         run: |
-          mkdir -p /tmp/digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "/tmp/digests/${digest#sha256:}"
-
-      - name: Upload digest
-        uses: actions/upload-artifact@v4
-        with:
-          name: digests-${{ matrix.runner }}
-          path: /tmp/digests/*
-          if-no-files-found: error
-          retention-days: 1
+          image_ref="${REGISTRY_IMAGE}:sha-${GITHUB_SHA}-${ARCH}"
+          docker tag text-to-speech-rs:latest "$image_ref"
+          docker push "$image_ref"
 
   merge:
     runs-on: ubuntu-latest
     needs: build
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -89,32 +83,31 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Docker meta
+      - name: Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY_IMAGE }}
           tags: |
             type=ref,event=branch
-            type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=sha,prefix=sha-
 
-      - name: Download digests
-        uses: actions/download-artifact@v4
-        with:
-          path: /tmp/digests
-          pattern: digests-*
-          merge-multiple: true
-
-      - name: Create manifest list and push
-        working-directory: /tmp/digests
+      - name: Create and push multi-architecture manifest
+        env:
+          DOCKER_METADATA_OUTPUT_JSON: ${{ steps.meta.outputs.json }}
         run: |
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
+          mapfile -t tags < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          tag_args=()
+          for tag in "${tags[@]}"; do
+            tag_args+=(--tag "$tag")
+          done
+
+          docker buildx imagetools create "${tag_args[@]}" \
+            "${REGISTRY_IMAGE}:sha-${GITHUB_SHA}-amd64" \
+            "${REGISTRY_IMAGE}:sha-${GITHUB_SHA}-arm64"
 
       - name: Inspect image
-        run: |
-          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
+        run: docker buildx imagetools inspect "${REGISTRY_IMAGE}:${{ steps.meta.outputs.version }}"

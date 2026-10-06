@@ -107,7 +107,7 @@ impl VoicevoxSynthesis for StreamingSynthesis {
                 let next = match response.next_chunk().await {
                     Ok(next) => next,
                     Err(error) => {
-                        let error = VoiceError::Api(error.into());
+                        let error = VoiceError::Api(error);
                         tracing::warn!(?error, "VOICEVOX streaming response failed");
                         let _ = tx.send(Err(error)).await;
                         break;

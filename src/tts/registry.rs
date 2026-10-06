@@ -1,6 +1,6 @@
 use crate::config::{AppConfig, CacheConfig, ProfileBackendConfig};
-use crate::tts::cache::CachedVoice;
 use crate::tts::google_cloud::GoogleCloudVoice;
+use crate::tts::utils::cache::CachedVoice;
 use crate::tts::voicevox::VoicevoxVoice;
 use crate::tts::{Voice, VoiceDetail, voicevox};
 use anyhow::Context;
@@ -71,7 +71,7 @@ pub struct VoiceRegistryBuilder {
     config: AppConfig,
     moka_cache: Option<Cache<String, Vec<u8>>>,
     google_cloud: Option<TextToSpeech>,
-    voicevox: Option<voicevox::Client>,
+    voicevox: Option<(voicevox::Client, voicevox::VoicevoxSynthesisFactory)>,
 }
 
 impl VoiceRegistryBuilder {
@@ -94,8 +94,12 @@ impl VoiceRegistryBuilder {
         self
     }
 
-    pub fn voicevox(mut self, voicevox: voicevox::Client) -> Self {
-        self.voicevox = Some(voicevox);
+    pub fn voicevox(
+        mut self,
+        voicevox: voicevox::Client,
+        synthesis_factory: voicevox::VoicevoxSynthesisFactory,
+    ) -> Self {
+        self.voicevox = Some((voicevox, synthesis_factory));
         self
     }
 
@@ -121,14 +125,17 @@ impl VoiceRegistryBuilder {
                     self.wrap_with_cache(Box::new(GoogleCloudVoice::new(client, c.clone())))
                 }
                 ProfileBackendConfig::VoicevoxVoice(c) => {
-                    let client = self.voicevox.as_ref()
+                    let (client, synthesis_config) = self.voicevox.as_ref()
                         .with_context(|| format!(
                             "Preset '{}' requires the VoiceVox backend, but it is not configured. Please verify that [backend.voicevox] exists and that 'enabled = true' and a valid 'url' are set in config.toml.",
                             id
-                        ))?
-                        .clone();
+                        ))?;
 
-                    self.wrap_with_cache(Box::new(VoicevoxVoice::new(client, c.clone())))
+                    self.wrap_with_cache(Box::new(VoicevoxVoice::new(
+                        client.clone(),
+                        c.clone(),
+                        *synthesis_config,
+                    )))
                 }
             };
 

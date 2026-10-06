@@ -1,7 +1,11 @@
-mod cache;
-pub mod google_cloud;
+mod providers;
 pub mod registry;
-pub mod voicevox;
+mod utils;
+
+// Keep the existing public module paths stable while implementations live
+// under their provider-specific directories.
+pub use providers::google_cloud;
+pub use providers::voicevox;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -9,7 +13,7 @@ use tokio::sync::mpsc;
 
 use thiserror::Error;
 
-const DISCORD_SAMPLE_RATE_HZ: i32 = 48_000;
+pub(crate) const DISCORD_SAMPLE_RATE_HZ: i32 = 48_000;
 /// Conservative receive-time margin before segment variability is estimated.
 const WARMUP_RECEIVE_MARGIN: std::time::Duration = std::time::Duration::from_secs(3);
 

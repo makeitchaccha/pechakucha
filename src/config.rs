@@ -107,13 +107,22 @@ pub struct VoicevoxBackendConfig {
     #[serde(default = "default_voicevox_timeout")]
     pub timeout: u64,
     #[serde(default)]
+    pub synthesis_mode: VoicevoxSynthesisMode,
+    #[serde(default)]
     pub streaming: VoicevoxStreamingConfig,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VoicevoxSynthesisMode {
+    #[default]
+    Buffered,
+    Streaming,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(default)]
 pub struct VoicevoxStreamingConfig {
-    pub enabled: bool,
     pub buffer_sigma: f64,
     pub segment_length: f64,
 }
@@ -121,7 +130,6 @@ pub struct VoicevoxStreamingConfig {
 impl Default for VoicevoxStreamingConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
             buffer_sigma: 2.0,
             segment_length: 3.0,
         }

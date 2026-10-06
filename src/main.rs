@@ -15,7 +15,9 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use text_to_speech_rs::binding::BindingRepository;
-use text_to_speech_rs::config::{AppConfig, DatabaseConfig, DatabaseKind, load_config};
+use text_to_speech_rs::config::{
+    AppConfig, DatabaseConfig, DatabaseKind, VoicevoxSynthesisMode, load_config,
+};
 use text_to_speech_rs::handler::event_handler;
 use text_to_speech_rs::localization::{load_discord_locales, load_tts_locales};
 use text_to_speech_rs::profile::resolver::ProfileResolver;
@@ -129,12 +131,16 @@ async fn cli_run(
             reqwest::ClientBuilder::new().build()?,
             Url::parse(&c.url)?,
             Duration::from_secs(c.timeout),
-            c.streaming.enabled,
-            c.streaming.buffer_sigma,
-            c.streaming.segment_length,
         );
 
-        registry_builder = registry_builder.voicevox(client);
+        let synthesis_factory = match c.synthesis_mode {
+            VoicevoxSynthesisMode::Buffered => voicevox::VoicevoxSynthesisFactory::buffered(),
+            VoicevoxSynthesisMode::Streaming => voicevox::VoicevoxSynthesisFactory::streaming(
+                c.streaming.buffer_sigma,
+                c.streaming.segment_length,
+            ),
+        };
+        registry_builder = registry_builder.voicevox(client, synthesis_factory);
     }
 
     let registry = registry_builder

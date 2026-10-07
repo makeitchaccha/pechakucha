@@ -4,8 +4,6 @@ use tokio::sync::mpsc;
 
 /// Start even if the prediction never reaches the normal startup threshold.
 const MAX_STARTUP_BUFFERING: Duration = Duration::from_secs(60);
-/// Recheck the time-based decision while waiting for the next chunk.
-const DECISION_RECHECK_INTERVAL: Duration = Duration::from_millis(50);
 
 pub(super) struct PlaybackStartGate {
     chunks: mpsc::Receiver<Result<bytes::Bytes, VoiceError>>,
@@ -54,8 +52,10 @@ impl PlaybackStartGate {
         let mut receive_playback_margin_secs = None;
         loop {
             let now = tokio::time::Instant::now();
-            if let Some((predicted, playable)) = self.startup_prediction(now) {
-                let margin = playable - predicted;
+            let margin = self
+                .startup_prediction(now)
+                .map(|(predicted, playable)| playable - predicted);
+            if let Some(margin) = margin {
                 receive_playback_margin_secs = Some(margin);
                 if margin > 0.0 {
                     reason = PlaybackStartGateReleaseReason::PredictionReady;
@@ -66,7 +66,7 @@ impl PlaybackStartGate {
                 reason = PlaybackStartGateReleaseReason::MaxBufferingTime;
                 break;
             }
-            let poll_deadline = (now + DECISION_RECHECK_INTERVAL).min(max_deadline);
+            let deadline = self.next_deadline(now, max_deadline, margin);
             tokio::select! {
                 biased;
                 chunk = self.chunks.recv() => match chunk {
@@ -86,7 +86,7 @@ impl PlaybackStartGate {
                         break;
                     },
                 },
-                _ = tokio::time::sleep_until(poll_deadline) => {},
+                _ = tokio::time::sleep_until(deadline) => {},
             }
         }
         PlaybackStartGateOutput {
@@ -108,5 +108,24 @@ impl PlaybackStartGate {
                 .predicted_receive_completion_delay(now, self.received_bytes),
             self.timing.safe_playback_window().as_secs_f64(),
         ))
+    }
+
+    fn next_deadline(
+        &self,
+        now: tokio::time::Instant,
+        max_deadline: tokio::time::Instant,
+        margin: Option<f64>,
+    ) -> tokio::time::Instant {
+        match margin {
+            Some(margin)
+                if now
+                    < self.timing.request_started_at + self.timing.estimated_total_receive_time =>
+            {
+                let until_ready =
+                    Duration::from_secs_f64((-margin).max(0.0)) + Duration::from_nanos(1);
+                (now + until_ready).min(max_deadline)
+            }
+            _ => max_deadline,
+        }
     }
 }

@@ -35,13 +35,11 @@ pub(super) async fn prebuffer_for_playback(
     let decision = loop {
         let now = tokio::time::Instant::now();
         let margin = startup_margin(&timing, received_bytes, now);
-        if let Some(margin) = margin {
-            if margin > 0.0 {
-                break PlaybackPrebufferDecision {
-                    reason: PlaybackPrebufferReleaseReason::PredictionReady,
-                    receive_playback_margin_secs: Some(margin),
-                };
-            }
+        if margin.is_some_and(|margin| margin > 0.0) {
+            break PlaybackPrebufferDecision {
+                reason: PlaybackPrebufferReleaseReason::PredictionReady,
+                receive_playback_margin_secs: margin,
+            };
         }
         if now >= max_deadline {
             break PlaybackPrebufferDecision {

@@ -1,5 +1,5 @@
 use crate::session::SessionControl;
-use crate::session::streaming::{PlaybackStartGate, PlaybackStartGateOutput};
+use crate::session::streaming::{PlaybackPrebuffer, prebuffer_for_playback};
 use crate::tts::AudioOutput;
 use async_trait::async_trait;
 use futures_util::{StreamExt, stream};
@@ -89,12 +89,11 @@ impl AudioDriver for SongbirdDriver {
                     let buffering_started = tokio::time::Instant::now();
                     let startup_buffer_span =
                         tracing::debug_span!("stream_startup_buffer", output_index).or_current();
-                    let PlaybackStartGateOutput {
+                    let PlaybackPrebuffer {
                         pending_chunks,
                         chunks,
                         decision,
-                    } = PlaybackStartGate::new(chunks, timing)
-                        .run()
+                    } = prebuffer_for_playback(chunks, timing)
                         .instrument(startup_buffer_span.clone())
                         .await;
                     let buffered_container_bytes = pending_chunks

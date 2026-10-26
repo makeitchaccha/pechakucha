@@ -58,7 +58,11 @@ pub async fn join(ctx: Context<'_>) -> Result<()> {
         Err(_) => ctx.data().resolver.fallback(),
     };
 
-    let voice = ctx.data().registry.get_voice(profile_str).unwrap();
+    let voice = ctx
+        .data()
+        .registry
+        .get_voice(profile_str)
+        .ok_or_else(|| anyhow::anyhow!("No voice preset found"))?;
 
     handle
         .announce(

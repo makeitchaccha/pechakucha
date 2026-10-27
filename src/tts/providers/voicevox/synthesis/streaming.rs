@@ -4,7 +4,6 @@ use crate::tts::providers::voicevox::{
 mod model;
 use crate::tts::{AudioOutput, StreamAudioFormat, StreamTimingProfile, VoiceError};
 use model::StreamingReceiveModel;
-use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tracing::Instrument;
 
@@ -16,7 +15,6 @@ const VOICEVOX_STREAM_AUDIO_FORMAT: StreamAudioFormat = StreamAudioFormat {
 };
 
 pub(in crate::tts::providers::voicevox) struct StreamingSynthesis {
-    receive_model: Arc<Mutex<StreamingReceiveModel>>,
     buffer_sigma: f64,
     segment_length: f64,
 }
@@ -24,7 +22,6 @@ pub(in crate::tts::providers::voicevox) struct StreamingSynthesis {
 impl StreamingSynthesis {
     pub(super) fn new(buffer_sigma: f64, segment_length: f64) -> Self {
         Self {
-            receive_model: Arc::new(Mutex::new(StreamingReceiveModel::new())),
             buffer_sigma,
             segment_length,
         }
@@ -42,6 +39,7 @@ impl VoicevoxSynthesis for StreamingSynthesis {
         // `segment_length` is the configured target duration, in seconds, for
         // each Engine-generated segment.
         let segment_length = self.segment_length;
+        let receive_model = StreamingReceiveModel::new();
         let span = tracing::info_span!(
             "voicevox_stream",
             speaker_id = config.speaker_id,
@@ -53,9 +51,7 @@ impl VoicevoxSynthesis for StreamingSynthesis {
             audio_query
                 .estimated_audio_duration()
                 .and_then(|duration| {
-                    self.receive_model
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    receive_model
                         .predict(duration)
                         .map(|prediction| (duration, prediction))
                 })
@@ -92,9 +88,9 @@ impl VoicevoxSynthesis for StreamingSynthesis {
         let (tx, chunks) = mpsc::channel(STREAM_CHUNK_QUEUE_CAPACITY);
         let expected_bytes = response.content_length();
         let request_elapsed = request_started.elapsed();
-        let receive_model = self.receive_model.clone();
         let stream_span = span.clone();
         tokio::spawn(async move {
+            let mut receive_model = receive_model;
             let mut received_bytes = 0u64;
             // Count request/header time and time actively waiting for HTTP
             // body data, but exclude time blocked forwarding into the bounded
@@ -126,8 +122,6 @@ impl VoicevoxSynthesis for StreamingSynthesis {
                         let t = measured_receive_time.as_secs_f64();
                         let d = estimated_audio_duration.as_secs_f64();
                         let update = receive_model
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner)
                             .observe_completed_request(d, t);
                         if let Some(update) = update {
                             tracing::debug!(
@@ -164,10 +158,7 @@ impl VoicevoxSynthesis for StreamingSynthesis {
                             >= full_segment_bytes
                                 * StreamingReceiveModel::MIN_SEGMENT_CHUNK_COMPLETENESS
                         {
-                            let mut model = receive_model
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner);
-                            model.observe_segment_interval(
+                            receive_model.observe_segment_interval(
                                 receive_wait.as_secs_f64(),
                                 VOICEVOX_STREAM_AUDIO_FORMAT
                                     .audio_seconds_for_payload_bytes(pcm_chunk_bytes),

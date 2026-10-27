@@ -4,6 +4,7 @@ use crate::tts::providers::voicevox::{
 mod model;
 use crate::tts::{AudioOutput, StreamAudioFormat, StreamTimingProfile, VoiceError};
 use model::StreamingReceiveModel;
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tracing::Instrument;
 
@@ -76,6 +77,7 @@ impl VoicevoxSynthesis for StreamingSynthesis {
                 return Ok(AudioOutput::Buffered(bytes.into()));
             }
         };
+        let receive_uncertainty = Arc::new(Mutex::new(prediction.segment_uncertainty));
         let request_started = std::time::Instant::now();
         let request_started_at = tokio::time::Instant::now();
 
@@ -89,8 +91,10 @@ impl VoicevoxSynthesis for StreamingSynthesis {
         let expected_bytes = response.content_length();
         let request_elapsed = request_started.elapsed();
         let stream_span = span.clone();
+        let receive_uncertainty_for_task = receive_uncertainty.clone();
         tokio::spawn(async move {
             let mut receive_model = receive_model;
+            let receive_uncertainty = receive_uncertainty_for_task;
             let mut received_bytes = 0u64;
             // Count request/header time and time actively waiting for HTTP
             // body data, but exclude time blocked forwarding into the bounded
@@ -163,6 +167,10 @@ impl VoicevoxSynthesis for StreamingSynthesis {
                                 VOICEVOX_STREAM_AUDIO_FORMAT
                                     .audio_seconds_for_payload_bytes(pcm_chunk_bytes),
                             );
+                            let updated = receive_model.segment_uncertainty();
+                            *receive_uncertainty
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner) = updated;
                         }
                     }
                     if pcm_chunk_bytes > 0 {
@@ -184,7 +192,7 @@ impl VoicevoxSynthesis for StreamingSynthesis {
                 estimated_total_receive_time: prediction.total_receive_time,
                 total_audio_playback_duration: estimated_audio_duration,
                 audio_format: VOICEVOX_STREAM_AUDIO_FORMAT,
-                receive_uncertainty: prediction.segment_uncertainty,
+                receive_uncertainty: receive_uncertainty,
                 buffer_sigma: self.buffer_sigma,
                 chunk_audio_duration: std::time::Duration::from_secs_f64(segment_length),
             },

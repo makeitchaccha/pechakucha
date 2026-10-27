@@ -131,7 +131,7 @@ impl StreamingReceiveModel {
         })
     }
 
-    fn segment_uncertainty(&self) -> SegmentReceiveUncertainty {
+    pub(super) fn segment_uncertainty(&self) -> SegmentReceiveUncertainty {
         match self.segment_uncertainty.standard_deviation_secs() {
             Some(standard_deviation_secs) => SegmentReceiveUncertainty::Estimated {
                 standard_deviation_secs,

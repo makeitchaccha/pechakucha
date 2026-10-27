@@ -9,6 +9,7 @@ pub use providers::voicevox;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
 use thiserror::Error;
@@ -71,7 +72,7 @@ pub struct StreamTimingProfile {
     pub total_audio_playback_duration: std::time::Duration,
     pub audio_format: StreamAudioFormat,
     /// Whether segment receive-time variability has enough samples for an estimate.
-    pub receive_uncertainty: SegmentReceiveUncertainty,
+    pub receive_uncertainty: Arc<Mutex<SegmentReceiveUncertainty>>,
     /// User-selected number of segment-time standard deviations for buffering.
     pub buffer_sigma: f64,
     pub chunk_audio_duration: std::time::Duration,
@@ -99,7 +100,11 @@ impl StreamTimingProfile {
         } else {
             (remaining_audio_secs / segment_secs).ceil()
         };
-        let receive_margin_secs = match self.receive_uncertainty {
+        let receive_uncertainty = self
+            .receive_uncertainty
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let receive_margin_secs = match *receive_uncertainty {
             SegmentReceiveUncertainty::Warmup => WARMUP_RECEIVE_MARGIN.as_secs_f64(),
             SegmentReceiveUncertainty::Estimated {
                 standard_deviation_secs,

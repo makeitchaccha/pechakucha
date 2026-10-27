@@ -102,7 +102,7 @@ fn next_deadline(
     margin: Option<f64>,
 ) -> tokio::time::Instant {
     match margin {
-        Some(margin) if now < timing.request_started_at + timing.estimated_total_receive_time => {
+        Some(margin) if now < timing.request_started_at + *timing.estimated_total_receive_time.lock().unwrap_or_else(std::sync::PoisonError::into_inner) => {
             let until_ready = Duration::from_secs_f64((-margin).max(0.0)) + Duration::from_nanos(1);
             (now + until_ready).min(max_deadline)
         }

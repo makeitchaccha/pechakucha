@@ -67,7 +67,7 @@ pub struct StreamTimingProfile {
     /// Request start used to calculate elapsed time in the startup policy.
     pub request_started_at: tokio::time::Instant,
     /// Predicted total time from request start until the complete response.
-    pub estimated_total_receive_time: std::time::Duration,
+    pub estimated_total_receive_time: Arc<Mutex<std::time::Duration>>,
     /// Estimated playback duration for the complete requested utterance.
     pub total_audio_playback_duration: std::time::Duration,
     pub audio_format: StreamAudioFormat,
@@ -87,8 +87,11 @@ impl StreamTimingProfile {
         received_container_bytes: u64,
     ) -> f64 {
         let elapsed = now.saturating_duration_since(self.request_started_at);
-        let remaining_receive_secs = self
+        let estimated_total = *self
             .estimated_total_receive_time
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let remaining_receive_secs = estimated_total
             .saturating_sub(elapsed)
             .as_secs_f64();
         let received_audio_secs = self.received_audio_duration_secs(received_container_bytes);

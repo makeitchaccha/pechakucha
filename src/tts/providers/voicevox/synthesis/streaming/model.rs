@@ -1,14 +1,18 @@
 use crate::tts::{SegmentReceiveUncertainty, VoiceError};
 
 struct SegmentUncertaintyModel {
-    residuals: Vec<f64>,
+    sum: f64,
+    sum_sq: f64,
+    count: u64,
     min_samples: u64,
 }
 
 impl SegmentUncertaintyModel {
     fn new(min_samples: u64) -> Self {
         Self {
-            residuals: Vec::new(),
+            sum: 0.0,
+            sum_sq: 0.0,
+            count: 0,
             min_samples,
         }
     }
@@ -17,22 +21,19 @@ impl SegmentUncertaintyModel {
         if !residual.is_finite() {
             return;
         }
-        self.residuals.push(residual);
+        self.sum += residual;
+        self.sum_sq += residual * residual;
+        self.count = self.count.saturating_add(1);
     }
 
     fn standard_deviation_secs(&self) -> Option<f64> {
-        let n = self.residuals.len() as u64;
+        let n = self.count;
         if n < self.min_samples || n < 2 {
             return None;
         }
         let n_f = n as f64;
-        let mean = self.residuals.iter().sum::<f64>() / n_f;
-        let sum_sq_dev = self.residuals
-            .iter()
-            .map(|r| (r - mean) * (r - mean))
-            .sum::<f64>();
-        // 不偏分散 (n-1)
-        Some((sum_sq_dev / (n_f - 1.0)).max(0.0).sqrt())
+        let variance = (self.sum_sq - self.sum * self.sum / n_f) / (n_f - 1.0);
+        Some(variance.max(0.0).sqrt())
     }
 }
 

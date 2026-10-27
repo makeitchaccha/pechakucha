@@ -34,6 +34,8 @@ impl SegmentUncertaintyModel {
 pub(super) struct StreamingReceiveModel {
     rls: RecursiveLeastSquares<2>,
     segment_uncertainty: SegmentUncertaintyModel,
+    current_cumulative_audio_secs: f64,
+    current_cumulative_receive_secs: f64,
 }
 
 #[derive(Clone, Copy)]
@@ -72,6 +74,8 @@ impl StreamingReceiveModel {
                 Self::UNCERTAINTY_ALPHA,
                 Self::MIN_UNCERTAINTY_SAMPLES,
             ),
+            current_cumulative_audio_secs: 0.0,
+            current_cumulative_receive_secs: 0.0,
         }
     }
 
@@ -153,5 +157,52 @@ impl StreamingReceiveModel {
         let segment_error = interval_secs - expected_interval;
         self.segment_uncertainty
             .observe_squared_error(segment_error * segment_error);
+
+        // Current-request prediction state: accumulate observed segment
+        // receive time vs. audio so the final receive time can be
+        // re-estimated as segments arrive. These cumulative values are NOT
+        // fed into the request-level RLS learner (they are correlated).
+        self.current_cumulative_audio_secs += audio_segment_secs;
+        self.current_cumulative_receive_secs += interval_secs;
+    }
+
+    /// Re-estimate the final receive time for the current request using the
+    /// segments observed so far. Returns `None` until at least one full
+    /// segment has been observed, in which case the caller keeps the
+    /// (request-level RLS) prediction made at request start.
+    pub(super) fn current_request_predicted_total_secs(&self, total_audio_secs: f64) -> Option<f64> {
+        if self.current_cumulative_audio_secs <= 0.0 || !total_audio_secs.is_finite() || total_audio_secs <= 0.0 {
+            return None;
+        }
+        let observed_rate = self.current_cumulative_receive_secs / self.current_cumulative_audio_secs;
+        // `b` is request-level overhead (from RLS); segments exclude it.
+        let overhead = self.rls.coefficients()[1];
+        Some((observed_rate * total_audio_secs + overhead).max(0.0))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn current_request_prediction_changes_as_segments_arrive() {
+        let mut model = StreamingReceiveModel::new();
+        let total_audio = 10.0;
+        assert!(model.current_request_predicted_total_secs(total_audio).is_none());
+
+        model.observe_segment_interval(3.0, 2.0);
+        let p1 = model
+            .current_request_predicted_total_secs(total_audio)
+            .expect("prediction after first segment");
+        assert!((p1 - 15.0).abs() < 1e-9, "p1={p1}");
+
+        model.observe_segment_interval(1.0, 2.0);
+        let p2 = model
+            .current_request_predicted_total_secs(total_audio)
+            .expect("prediction after second segment");
+        assert!((p2 - 10.0).abs() < 1e-9, "p2={p2}");
+
+        assert!((p1 - p2).abs() > 1e-9);
     }
 }

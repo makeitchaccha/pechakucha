@@ -78,6 +78,7 @@ impl VoicevoxSynthesis for StreamingSynthesis {
             }
         };
         let receive_uncertainty = Arc::new(Mutex::new(prediction.segment_uncertainty));
+        let estimated_total_receive_time = Arc::new(Mutex::new(prediction.total_receive_time));
         let request_started = std::time::Instant::now();
         let request_started_at = tokio::time::Instant::now();
 
@@ -92,9 +93,11 @@ impl VoicevoxSynthesis for StreamingSynthesis {
         let request_elapsed = request_started.elapsed();
         let stream_span = span.clone();
         let receive_uncertainty_for_task = receive_uncertainty.clone();
+        let estimated_total_for_task = estimated_total_receive_time.clone();
         tokio::spawn(async move {
             let mut receive_model = receive_model;
             let receive_uncertainty = receive_uncertainty_for_task;
+            let estimated_total_receive_time = estimated_total_for_task;
             let mut received_bytes = 0u64;
             // Count request/header time and time actively waiting for HTTP
             // body data, but exclude time blocked forwarding into the bounded
@@ -171,6 +174,15 @@ impl VoicevoxSynthesis for StreamingSynthesis {
                             *receive_uncertainty
                                 .lock()
                                 .unwrap_or_else(std::sync::PoisonError::into_inner) = updated;
+                            if let Some(predicted_secs) = receive_model
+                                .current_request_predicted_total_secs(estimated_audio_duration.as_secs_f64())
+                            {
+                                if let Ok(d) = std::time::Duration::try_from_secs_f64(predicted_secs) {
+                                    *estimated_total_receive_time
+                                        .lock()
+                                        .unwrap_or_else(std::sync::PoisonError::into_inner) = d;
+                                }
+                            }
                         }
                     }
                     if pcm_chunk_bytes > 0 {
@@ -189,7 +201,7 @@ impl VoicevoxSynthesis for StreamingSynthesis {
             chunks,
             timing: StreamTimingProfile {
                 request_started_at,
-                estimated_total_receive_time: prediction.total_receive_time,
+                estimated_total_receive_time: estimated_total_receive_time,
                 total_audio_playback_duration: estimated_audio_duration,
                 audio_format: VOICEVOX_STREAM_AUDIO_FORMAT,
                 receive_uncertainty: receive_uncertainty,

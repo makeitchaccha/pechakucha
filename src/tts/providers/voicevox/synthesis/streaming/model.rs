@@ -122,10 +122,15 @@ impl StreamingReceiveModel {
         self.segment_uncertainty
             .observe_squared_error(segment_error * segment_error);
 
+        // Online RLS learning from this segment: update the receive rate `r`
+        // (slope) only, holding the request-level overhead `b` fixed by passing
+        // a zero feature for the intercept. This is per-segment learning, not
+        // a cumulative (correlated) observation.
+        let _ = self.rls.update([audio_segment_secs, 0.0], interval_secs);
+
         // Current-request prediction state: accumulate observed segment
         // receive time vs. audio so the final receive time can be
-        // re-estimated as segments arrive. These cumulative values are NOT
-        // fed into the request-level RLS learner (they are correlated).
+        // re-estimated as segments arrive.
         self.current_cumulative_audio_secs += audio_segment_secs;
         self.current_cumulative_receive_secs += interval_secs;
     }

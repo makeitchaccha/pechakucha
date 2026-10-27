@@ -79,7 +79,6 @@ impl VoicevoxSynthesis for StreamingSynthesis {
         };
         let receive_uncertainty = Arc::new(Mutex::new(prediction.segment_uncertainty));
         let estimated_total_receive_time = Arc::new(Mutex::new(prediction.total_receive_time));
-        let request_started = std::time::Instant::now();
         let request_started_at = tokio::time::Instant::now();
 
         let mut response = client
@@ -90,7 +89,6 @@ impl VoicevoxSynthesis for StreamingSynthesis {
 
         let (tx, chunks) = mpsc::channel(STREAM_CHUNK_QUEUE_CAPACITY);
         let expected_bytes = response.content_length();
-        let request_elapsed = request_started.elapsed();
         let stream_span = span.clone();
         let receive_uncertainty_for_task = receive_uncertainty.clone();
         let estimated_total_for_task = estimated_total_receive_time.clone();
@@ -103,7 +101,6 @@ impl VoicevoxSynthesis for StreamingSynthesis {
             // body data, but exclude time blocked forwarding into the bounded
             // consumer channel. Otherwise Session's own startup buffering
             // would bias the EMA upward.
-            let mut measured_receive_time = request_elapsed;
             let mut saw_pcm_chunk = false;
             loop {
                 let wait_started = std::time::Instant::now();
@@ -117,7 +114,6 @@ impl VoicevoxSynthesis for StreamingSynthesis {
                     }
                 };
                 let receive_wait = wait_started.elapsed();
-                measured_receive_time += receive_wait;
                 let Some(result) = next else {
                     if expected_bytes.is_some_and(|expected| expected != received_bytes) {
                         let error = VoiceError::Api(anyhow::anyhow!(
@@ -126,23 +122,6 @@ impl VoicevoxSynthesis for StreamingSynthesis {
                         tracing::warn!(?error, "VOICEVOX streaming response was truncated");
                         let _ = tx.send(Err(error)).await;
                     } else {
-                        let t = measured_receive_time.as_secs_f64();
-                        let d = estimated_audio_duration.as_secs_f64();
-                        let update = receive_model
-                            .observe_completed_request(d, t);
-                        if let Some(update) = update {
-                            tracing::debug!(
-                                audio_duration_secs = d,
-                                predicted_total_receive_secs = update.predicted_receive_time_secs,
-                                observed_total_receive_secs = t,
-                                residual_secs = t - update.predicted_receive_time_secs,
-                                r_before = update.r_before,
-                                b_before = update.b_before,
-                                r_after = update.r_after,
-                                b_after = update.b_after,
-                                "VOICEVOX receive-time RLS updated"
-                            );
-                        }
                         tracing::debug!(
                             received_bytes,
                             expected_bytes,

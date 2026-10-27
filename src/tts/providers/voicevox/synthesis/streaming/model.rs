@@ -46,14 +46,6 @@ pub(super) struct StreamingReceivePrediction {
     pub(super) segment_uncertainty: SegmentReceiveUncertainty,
 }
 
-pub(super) struct StreamingReceiveModelUpdate {
-    pub(super) predicted_receive_time_secs: f64,
-    pub(super) r_before: f64,
-    pub(super) b_before: f64,
-    pub(super) r_after: f64,
-    pub(super) b_after: f64,
-}
-
 impl StreamingReceiveModel {
     const INITIAL_COEFFICIENTS: [f64; 2] = [1.0, 0.0];
     const INITIAL_COVARIANCE: [[f64; 2]; 2] = [[100.0, 0.0], [0.0, 100.0]];
@@ -105,34 +97,6 @@ impl StreamingReceiveModel {
 
     fn receive_time_features(audio_duration_secs: f64) -> [f64; 2] {
         [audio_duration_secs, 1.0]
-    }
-
-    pub(super) fn observe_completed_request(
-        &mut self,
-        audio_duration_secs: f64,
-        receive_time_secs: f64,
-    ) -> Option<StreamingReceiveModelUpdate> {
-        if !audio_duration_secs.is_finite()
-            || audio_duration_secs <= 0.0
-            || !receive_time_secs.is_finite()
-            || receive_time_secs <= 0.0
-        {
-            return None;
-        }
-
-        let features = Self::receive_time_features(audio_duration_secs);
-        let predicted_receive_time_secs = self.rls.predict(features);
-        let [r_before, b_before] = *self.rls.coefficients();
-        self.rls.update(features, receive_time_secs).ok()?;
-        let [r_after, b_after] = *self.rls.coefficients();
-
-        Some(StreamingReceiveModelUpdate {
-            predicted_receive_time_secs,
-            r_before,
-            b_before,
-            r_after,
-            b_after,
-        })
     }
 
     pub(super) fn segment_uncertainty(&self) -> SegmentReceiveUncertainty {

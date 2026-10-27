@@ -48,7 +48,7 @@ impl StreamingReceiveModel {
     /// Ignore short chunks when measuring the receive interval of full segments.
     pub(super) const MIN_SEGMENT_CHUNK_COMPLETENESS: f64 = 0.9;
     const UNCERTAINTY_ALPHA: f64 = 0.2;
-    const MIN_UNCERTAINTY_SAMPLES: u64 = 5;
+    const MIN_UNCERTAINTY_SAMPLES: u64 = 2;
 
     pub(super) fn new() -> Self {
         Self {

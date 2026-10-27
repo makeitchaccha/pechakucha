@@ -1,30 +1,38 @@
 use crate::tts::{SegmentReceiveUncertainty, VoiceError};
 
 struct SegmentUncertaintyModel {
-    error_variance_secs2: f64,
-    samples_seen: u64,
-    alpha: f64,
+    residuals: Vec<f64>,
     min_samples: u64,
 }
 
 impl SegmentUncertaintyModel {
-    fn new(alpha: f64, min_samples: u64) -> Self {
+    fn new(min_samples: u64) -> Self {
         Self {
-            error_variance_secs2: 0.0,
-            samples_seen: 0,
-            alpha,
+            residuals: Vec::new(),
             min_samples,
         }
     }
 
-    fn observe_squared_error(&mut self, squared_error: f64) {
-        self.error_variance_secs2 =
-            (1.0 - self.alpha) * self.error_variance_secs2 + self.alpha * squared_error;
-        self.samples_seen = self.samples_seen.saturating_add(1);
+    fn observe_residual(&mut self, residual: f64) {
+        if !residual.is_finite() {
+            return;
+        }
+        self.residuals.push(residual);
     }
 
     fn standard_deviation_secs(&self) -> Option<f64> {
-        (self.samples_seen >= self.min_samples).then(|| self.error_variance_secs2.max(0.0).sqrt())
+        let n = self.residuals.len() as u64;
+        if n < self.min_samples || n < 2 {
+            return None;
+        }
+        let n_f = n as f64;
+        let mean = self.residuals.iter().sum::<f64>() / n_f;
+        let sum_sq_dev = self.residuals
+            .iter()
+            .map(|r| (r - mean) * (r - mean))
+            .sum::<f64>();
+        // 不偏分散 (n-1)
+        Some((sum_sq_dev / (n_f - 1.0)).max(0.0).sqrt())
     }
 }
 
@@ -47,13 +55,11 @@ pub(super) struct StreamingReceivePrediction {
 impl StreamingReceiveModel {
     /// Ignore short chunks when measuring the receive interval of full segments.
     pub(super) const MIN_SEGMENT_CHUNK_COMPLETENESS: f64 = 0.9;
-    const UNCERTAINTY_ALPHA: f64 = 0.2;
-    const MIN_UNCERTAINTY_SAMPLES: u64 = 1;
+    const MIN_UNCERTAINTY_SAMPLES: u64 = 2;
 
     pub(super) fn new() -> Self {
         Self {
             segment_uncertainty: SegmentUncertaintyModel::new(
-                Self::UNCERTAINTY_ALPHA,
                 Self::MIN_UNCERTAINTY_SAMPLES,
             ),
             current_cumulative_audio_secs: 0.0,
@@ -111,7 +117,7 @@ impl StreamingReceiveModel {
         let expected_interval = rate * audio_segment_secs;
         let segment_error = interval_secs - expected_interval;
         self.segment_uncertainty
-            .observe_squared_error(segment_error * segment_error);
+            .observe_residual(segment_error);
 
         // Current-request prediction state: accumulate observed segment
         // receive time vs. audio so the final receive time can be

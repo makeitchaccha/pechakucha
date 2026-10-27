@@ -76,11 +76,13 @@ impl ProfileRepository for SQLiteProfileRepository {
 
     async fn save_user(&self, user_id: UserId, profile_id: &str) -> anyhow::Result<()> {
         let id = user_id.to_string();
-        let _ = sqlx::query!(
+        sqlx::query!(
                 "INSERT INTO user_profiles(user_id, profile_id) VALUES(?, ?) ON CONFLICT (user_id) DO UPDATE SET profile_id = EXCLUDED.profile_id -- sqlite",
                 id,
                 profile_id
-            ).execute(&self.pool).await?;
+            )
+            .execute(&self.pool)
+            .await?;
 
         Ok(())
     }

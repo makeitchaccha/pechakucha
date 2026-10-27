@@ -50,7 +50,10 @@ pub async fn start(
         Err(_) => data.resolver.fallback(),
     };
 
-    let voice = data.registry.get_voice(profile_str).unwrap();
+    let voice = data
+        .registry
+        .get_voice(profile_str)
+        .ok_or_else(|| anyhow::anyhow!("No voice preset found"))?;
 
     handle
         .announce(

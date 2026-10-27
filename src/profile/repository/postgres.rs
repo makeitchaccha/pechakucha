@@ -78,11 +78,13 @@ impl ProfileRepository for PostgresRepository {
 
     async fn save_user(&self, user_id: UserId, profile_id: &str) -> anyhow::Result<()> {
         let id = user_id.to_string();
-        let _ = sqlx::query!(
+        sqlx::query!(
                 "INSERT INTO user_profiles(user_id, profile_id) VALUES($1, $2) ON CONFLICT (user_id) DO UPDATE SET profile_id = EXCLUDED.profile_id -- postgres",
                 id,
                 profile_id
-            ).fetch_optional(&self.pool).await?;
+            )
+            .execute(&self.pool)
+            .await?;
 
         Ok(())
     }

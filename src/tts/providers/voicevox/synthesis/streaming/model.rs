@@ -1,4 +1,3 @@
-use crate::math::recursive_least_squares::RecursiveLeastSquares;
 use crate::tts::{SegmentReceiveUncertainty, VoiceError};
 
 struct SegmentUncertaintyModel {
@@ -32,7 +31,6 @@ impl SegmentUncertaintyModel {
 /// RLS estimates for request receive time and EMA uncertainty for
 /// segment-to-segment receive-time variation.
 pub(super) struct StreamingReceiveModel {
-    rls: RecursiveLeastSquares<2>,
     segment_uncertainty: SegmentUncertaintyModel,
     current_cumulative_audio_secs: f64,
     current_cumulative_receive_secs: f64,
@@ -47,9 +45,6 @@ pub(super) struct StreamingReceivePrediction {
 }
 
 impl StreamingReceiveModel {
-    const INITIAL_COEFFICIENTS: [f64; 2] = [1.0, 0.0];
-    const INITIAL_COVARIANCE: [[f64; 2]; 2] = [[100.0, 0.0], [0.0, 100.0]];
-    const FORGETTING_FACTOR: f64 = 0.9;
     /// Ignore short chunks when measuring the receive interval of full segments.
     pub(super) const MIN_SEGMENT_CHUNK_COMPLETENESS: f64 = 0.9;
     const UNCERTAINTY_ALPHA: f64 = 0.05;
@@ -57,11 +52,6 @@ impl StreamingReceiveModel {
 
     pub(super) fn new() -> Self {
         Self {
-            rls: RecursiveLeastSquares::new(
-                Self::INITIAL_COEFFICIENTS,
-                Self::INITIAL_COVARIANCE,
-                Self::FORGETTING_FACTOR,
-            ),
             segment_uncertainty: SegmentUncertaintyModel::new(
                 Self::UNCERTAINTY_ALPHA,
                 Self::MIN_UNCERTAINTY_SAMPLES,
@@ -75,11 +65,9 @@ impl StreamingReceiveModel {
         &self,
         audio_duration: std::time::Duration,
     ) -> Result<StreamingReceivePrediction, VoiceError> {
-        let [receive_rate_secs_per_audio_sec, request_overhead_secs] = *self.rls.coefficients();
-        let estimated_secs = self
-            .rls
-            .predict(Self::receive_time_features(audio_duration.as_secs_f64()))
-            .max(0.0);
+        // No request-level RLS learning (state is per-request and discarded),
+        // so the receive rate defaults to 1.0 and overhead to 0.
+        let estimated_secs = audio_duration.as_secs_f64().max(0.0);
         let total_receive_time =
             std::time::Duration::try_from_secs_f64(estimated_secs).map_err(|error| {
                 VoiceError::Api(anyhow::anyhow!(
@@ -89,14 +77,10 @@ impl StreamingReceiveModel {
 
         Ok(StreamingReceivePrediction {
             total_receive_time,
-            receive_rate_secs_per_audio_sec,
-            request_overhead_secs,
+            receive_rate_secs_per_audio_sec: 1.0,
+            request_overhead_secs: 0.0,
             segment_uncertainty: self.segment_uncertainty(),
         })
-    }
-
-    fn receive_time_features(audio_duration_secs: f64) -> [f64; 2] {
-        [audio_duration_secs, 1.0]
     }
 
     pub(super) fn segment_uncertainty(&self) -> SegmentReceiveUncertainty {
@@ -117,16 +101,17 @@ impl StreamingReceiveModel {
             return;
         }
 
-        let expected_interval = self.rls.coefficients()[0] * audio_segment_secs;
+        // Expected interval from the rate estimated so far (cumulative), or
+        // 1.0 as a conservative fallback when no prior segment is available.
+        let rate = if self.current_cumulative_audio_secs > 0.0 {
+            self.current_cumulative_receive_secs / self.current_cumulative_audio_secs
+        } else {
+            1.0
+        };
+        let expected_interval = rate * audio_segment_secs;
         let segment_error = interval_secs - expected_interval;
         self.segment_uncertainty
             .observe_squared_error(segment_error * segment_error);
-
-        // Online RLS learning from this segment: update the receive rate `r`
-        // (slope) only, holding the request-level overhead `b` fixed by passing
-        // a zero feature for the intercept. This is per-segment learning, not
-        // a cumulative (correlated) observation.
-        let _ = self.rls.update([audio_segment_secs, 0.0], interval_secs);
 
         // Current-request prediction state: accumulate observed segment
         // receive time vs. audio so the final receive time can be
@@ -144,9 +129,7 @@ impl StreamingReceiveModel {
             return None;
         }
         let observed_rate = self.current_cumulative_receive_secs / self.current_cumulative_audio_secs;
-        // `b` is request-level overhead (from RLS); segments exclude it.
-        let overhead = self.rls.coefficients()[1];
-        Some((observed_rate * total_audio_secs + overhead).max(0.0))
+        Some((observed_rate * total_audio_secs).max(0.0))
     }
 }
 
